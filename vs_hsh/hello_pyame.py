@@ -5,7 +5,7 @@ import math
 
 pygame.init()
 screen = pygame.display.set_mode((800, 600))
-pygame.display.set_caption("Spikes Game - Game Over!")
+pygame.display.set_caption("Spikes Game - Survival")
 
 WHITE = (255, 255, 255)
 BLUE = (0, 0, 255)
@@ -13,7 +13,6 @@ BLACK = (0, 0, 0)
 RED = (255, 0, 0)
 
 font = pygame.font.SysFont(None, 30)
-# 게임오버용 큰 폰트
 large_font = pygame.font.SysFont(None, 80)
 
 player_x, player_y = 400.0, 300.0
@@ -25,7 +24,8 @@ spike_speed = 300
 spike_radius = 10
 spawn_timer = 0
 
-# --- 게임 상태 변수 ---
+# --- 새로운 변수 추가 ---
+survival_time = 0.0  # 생존 시간 기록용
 game_over = False
 
 clock = pygame.time.Clock()
@@ -37,16 +37,19 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-        # 게임 오버 상태에서 R키를 누르면 재시작
+        
         if game_over and event.type == pygame.KEYDOWN:
             if event.key == pygame.K_r:
                 game_over = False
                 player_x, player_y = 400.0, 300.0
                 spikes = []
                 spawn_timer = 0
+                survival_time = 0.0 # 타이머 초기화
 
-    # --- 게임이 실행 중일 때만 로직 계산 ---
     if not game_over:
+        # 1. 생존 시간 업데이트 (델타 타임을 계속 더해줌)
+        survival_time += dt
+
         # 플레이어 이동
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT]: player_x -= player_speed * dt
@@ -79,10 +82,7 @@ while running:
             spike["x"] += spike["vx"] * dt
             spike["y"] += spike["vy"] * dt
             
-            # --- 충돌 체크 로직 ---
-            # 플레이어와 가시 사이의 거리를 구함
             distance = math.hypot(player_x - spike["x"], player_y - spike["y"])
-            # 거리가 두 반지름의 합보다 작으면 충돌!
             if distance < (player_radius + spike_radius):
                 game_over = True
 
@@ -92,22 +92,30 @@ while running:
     # --- 그리기 ---
     screen.fill(WHITE)
     
-    # 플레이어와 가시 그리기
     pygame.draw.circle(screen, BLUE, (int(player_x), int(player_y)), player_radius)
     for spike in spikes:
         pygame.draw.circle(screen, RED, (int(spike["x"]), int(spike["y"])), spike_radius)
 
-    # 게임 오버 메시지 표시
+    # --- UI 정보 출력 ---
+    # 2. 타이머 표시 (소수점 둘째자리까지)
+    time_text = font.render(f"Time: {survival_time:.2f}s", True, BLACK)
+    # 3. 가시 개수 표시 (리스트의 길이)
+    spike_count_text = font.render(f"Spikes: {len(spikes)}", True, BLACK)
+    fps_text = font.render(f"FPS: {int(clock.get_fps())}", True, BLACK)
+
+    screen.blit(time_text, (10, 10))        # 좌측 상단 타이머
+    screen.blit(spike_count_text, (10, 40)) # 그 아래 가시 수
+    screen.blit(fps_text, (700, 10))        # 우측 상단 FPS
+
     if game_over:
         over_text = large_font.render("GAME OVER", True, BLACK)
+        # 게임 오버 시 최종 기록 표시
+        final_score_text = font.render(f"Final Time: {survival_time:.2f} seconds", True, RED)
         retry_text = font.render("Press 'R' to Restart", True, BLACK)
-        # 화면 중앙에 배치
-        screen.blit(over_text, (230, 250))
-        screen.blit(retry_text, (300, 330))
-
-    # 정보 출력
-    fps_text = font.render(f"FPS: {int(clock.get_fps())}", True, BLACK)
-    screen.blit(fps_text, (10, 10))
+        
+        screen.blit(over_text, (230, 200))
+        screen.blit(final_score_text, (270, 280))
+        screen.blit(retry_text, (300, 350))
 
     pygame.display.flip()
 
