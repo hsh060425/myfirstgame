@@ -1,7 +1,7 @@
 # 6주차 실습 기록
 ## 사용한 에셋
-- 이미지: overbound https://studio.youtube.com/channel/UCys7MhWOqbribi_VFEeqyEA/music
-- 사운드:(Storytelling Cartoon SciFiLazer 01 https://sellbuymusic.com/ko/search/soundeffect?srchKeyword=lazer )
+- 이미지: Space Shooter - Ship Constructor https://anim86.itch.io/space-shooter-ship-constructor
+- 사운드:(Storytelling Cartoon SciFiLazer 01 https://sellbuymusic.com/ko/search/soundeffect?srchKeyword=lazer )overbound https://studio.youtube.com/channel/UCys7MhWOqbribi_VFEeqyEA/music
 ## 사용한 AI 프롬프트 (요약)
 1. 파이게임에서 효과음같은 소리를 임뱅딩하면 좋은 이유가 뭐야?
 - 단일 파일 배포 (Single-File Distribution)
