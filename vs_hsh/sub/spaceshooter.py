@@ -1,8 +1,10 @@
 import pygame
 import random
 import sys
+import os
 
 pygame.init()
+pygame.mixer.init() # 사운드 재생을 위한 초기화
 
 # --- 설정 및 상수 ---
 WIDTH, HEIGHT = 800, 600
@@ -19,9 +21,37 @@ ORANGE  = (255, 165, 0)
 PURPLE  = (160, 32, 240)
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Space Shooter - Power Up System")
+pygame.display.set_caption("Space Shooter - Image & Sound")
 clock = pygame.time.Clock()
 
+# --- 리소스 로드 함수 ---
+PLAYER_W, PLAYER_H = 45, 45
+BULLET_W, BULLET_H = 15, 30 # 총알 이미지 크기에 맞게 조정
+
+def load_image(file_name, width, height):
+    try:
+        img = pygame.image.load(file_name).convert_alpha()
+        return pygame.transform.scale(img, (width, height))
+    except:
+        print(f"파일 '{file_name}'을 찾을 수 없습니다.")
+        return None
+
+def load_sound(file_name):
+    try:
+        return pygame.mixer.Sound(file_name)
+    except:
+        print(f"사운드 '{file_name}'을 찾을 수 없습니다.")
+        return None
+
+# 리소스 불러오기
+PLAYER_IMAGE = load_image("./assets/images/player.png", PLAYER_W, PLAYER_H)
+BULLET_IMAGE = load_image("./assets/images/lazer.png", BULLET_W, BULLET_H)
+SHOOT_SOUND  = load_sound("./assets/sounds/lazer.wav")
+
+if SHOOT_SOUND:
+    SHOOT_SOUND.set_volume(0.3) # 소리 크기 조절 (0.0 ~ 1.0)
+
+# --- 폰트 설정 ---
 def get_korean_font(size):
     candidates = ["malgungothic", "applegothic", "nanumgothic", "notosanscjk"]
     for name in candidates:
@@ -33,13 +63,12 @@ font_small = get_korean_font(18)
 font = get_korean_font(25)
 font_big = get_korean_font(70)
 
-PLAYER_W, PLAYER_H = 40, 40
+# --- 상수 ---
 ENEMY_W,  ENEMY_H  = 40, 40
-BULLET_W, BULLET_H = 6,  14
 ITEM_SIZE = 20
 MAX_HP = 100
 
-# --- 난이도 계산 함수 ---
+# --- 난이도 계산 ---
 def get_difficulty(elapsed_seconds):
     speed = min(12.0, 2.0 + (elapsed_seconds / 15))
     spawn_delay = max(6, 60 - (elapsed_seconds / 3))
@@ -49,9 +78,18 @@ def get_difficulty(elapsed_seconds):
 
 # --- 그리기 함수들 ---
 def draw_player(surf, rect):
-    cx = rect.centerx
-    pygame.draw.polygon(surf, BLUE, [(cx, rect.top), (rect.left, rect.bottom), (cx, rect.bottom - 8), (rect.right, rect.bottom)])
-    pygame.draw.rect(surf, YELLOW, (cx - 4, rect.bottom - 10, 8, 10))
+    if PLAYER_IMAGE:
+        surf.blit(PLAYER_IMAGE, rect.topleft)
+    else:
+        cx = rect.centerx
+        pygame.draw.polygon(surf, BLUE, [(cx, rect.top), (rect.left, rect.bottom), (cx, rect.bottom - 8), (rect.right, rect.bottom)])
+
+def draw_bullet(surf, b_obj):
+    if BULLET_IMAGE:
+        # 이미지의 중심을 맞추기 위해 보정하여 출력
+        surf.blit(BULLET_IMAGE, b_obj['rect'].topleft)
+    else:
+        pygame.draw.rect(surf, YELLOW, b_obj['rect'])
 
 def draw_enemy(surf, enemy_obj):
     rect = enemy_obj['rect']
@@ -63,24 +101,17 @@ def draw_enemy(surf, enemy_obj):
         pygame.draw.rect(surf, GREEN, (rect.x, rect.y - 10, rect.width * hp_ratio, 4))
 
 def draw_hud(score, hp, elapsed_seconds, e_hp, e_dmg, p_dmg, p_fire_rate, p_move):
-    # 상단 정보
     screen.blit(font.render(f"Score: {score}", True, WHITE), (20, 20))
     screen.blit(font.render(f"Time: {elapsed_seconds}s", True, ORANGE), (20, 50))
     
-    # HP 바
     bar_width = 200
     pygame.draw.rect(screen, (100, 0, 0), (WIDTH - bar_width - 20, 25, bar_width, 20))
     pygame.draw.rect(screen, GREEN, (WIDTH - bar_width - 20, 25, max(0, (hp / MAX_HP) * bar_width), 20))
 
-    # 왼쪽 아래 플레이어 능력치
     stats_y = HEIGHT - 100
     screen.blit(font_small.render(f"STR (공격력): {p_dmg}", True, RED), (20, stats_y))
     screen.blit(font_small.render(f"AGI (연사력): {int(20 - p_fire_rate)}", True, YELLOW), (20, stats_y + 25))
     screen.blit(font_small.render(f"SPD (이동속도): {p_move}", True, BLUE), (20, stats_y + 50))
-
-    # 중앙 적 정보
-    spec_txt = font.render(f"Enemy [HP: {int(e_hp)} | DMG: {int(e_dmg)}]", True, (150, 150, 150))
-    screen.blit(spec_txt, (WIDTH // 2 - spec_txt.get_width() // 2, 20))
 
 def game_over_screen(score, elapsed_seconds):
     screen.fill((10, 10, 30))
@@ -100,18 +131,17 @@ def game_over_screen(score, elapsed_seconds):
 
 # --- 메인 게임 루프 ---
 def main():
-    player = pygame.Rect(WIDTH//2 - 20, HEIGHT-70, PLAYER_W, PLAYER_H)
+    player = pygame.Rect(WIDTH//2 - PLAYER_W//2, HEIGHT-70, PLAYER_W, PLAYER_H)
     hp = MAX_HP
     score = 0
     
-    # 플레이어 초기 능력치
     p_dmg = 1
-    p_fire_rate = 15 # 낮을수록 빠름
+    p_fire_rate = 10
     p_move = 6
     
     bullets = []
     enemies = []
-    items = [] # {'rect': Rect, 'type': str, 'color': tuple}
+    items = []
     
     spawn_timer = 0
     invincible = 0
@@ -128,25 +158,24 @@ def main():
         for e in pygame.event.get():
             if e.type == pygame.QUIT: pygame.quit(); sys.exit()
 
-        # 조작 (p_move 반영)
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT] and player.left > 0: player.x -= p_move
         if keys[pygame.K_RIGHT] and player.right < WIDTH: player.x += p_move
         if keys[pygame.K_UP] and player.top > 0: player.y -= p_move
         if keys[pygame.K_DOWN] and player.bottom < HEIGHT: player.y += p_move
 
-        # 발사 (p_fire_rate 반영)
+        # --- 발사 및 사운드 재생 ---
         shoot_cd -= 1
         if keys[pygame.K_SPACE] and shoot_cd <= 0:
-            bullets.append({'rect': pygame.Rect(player.centerx - BULLET_W//2, player.top, BULLET_W, BULLET_H), 'dmg': p_dmg})
+            bullets.append({'rect': pygame.Rect(player.centerx - BULLET_W//2, player.top - BULLET_H, BULLET_W, BULLET_H), 'dmg': p_dmg})
             shoot_cd = p_fire_rate
+            if SHOOT_SOUND:
+                SHOOT_SOUND.play()
 
-        # 총알 이동
         for b in bullets[:]:
-            b['rect'].y -= 10
+            b['rect'].y -= 12 # 총알 속도
             if b['rect'].bottom < 0: bullets.remove(b)
 
-        # 적 생성
         spawn_timer += 1
         if spawn_timer >= cur_spawn_delay:
             spawn_timer = 0
@@ -157,7 +186,6 @@ def main():
             en['rect'].y += cur_speed
             if en['rect'].top > HEIGHT: enemies.remove(en)
 
-        # 아이템 이동 및 획득
         for it in items[:]:
             it['rect'].y += 3
             if it['rect'].colliderect(player):
@@ -169,14 +197,12 @@ def main():
             elif it['rect'].top > HEIGHT:
                 items.remove(it)
 
-        # 충돌: 총알 vs 적
         for b in bullets[:]:
             for en in enemies[:]:
                 if b['rect'].colliderect(en['rect']):
                     if b in bullets: bullets.remove(b)
                     en['hp'] -= b['dmg']
                     if en['hp'] <= 0:
-                        # 아이템 드랍 (20% 확률)
                         if random.random() < 0.2:
                             itype = random.choice(['dmg', 'spd', 'move', 'heal'])
                             icolor = {'dmg': RED, 'spd': YELLOW, 'move': BLUE, 'heal': GREEN}[itype]
@@ -186,7 +212,6 @@ def main():
                         score += 10 + (int(en['max_hp']) * 2)
                     break
 
-        # 충돌: 플레이어 vs 적
         if invincible > 0: invincible -= 1
         else:
             for en in enemies[:]:
@@ -198,25 +223,24 @@ def main():
                         if game_over_screen(score, elapsed_seconds): main()
                         return
 
-        # 그리기
+        # --- 그리기 ---
         screen.fill(GRAY)
         for s in stars:
             s[1] += 1
             if s[1] > HEIGHT: s[1] = 0; s[0] = random.randint(0, WIDTH)
             pygame.draw.circle(screen, WHITE, (s[0], s[1]), s[2])
 
-        for b in bullets: pygame.draw.rect(screen, YELLOW, b['rect'])
+        for b in bullets: draw_bullet(screen, b)
         for en in enemies: draw_enemy(screen, en)
         
-        # 아이템 그리기 (원으로 표시)
         for it in items:
             pygame.draw.circle(screen, it['color'], it['rect'].center, ITEM_SIZE // 2)
-            # 아이템 종류 표시 (P, S, M, H)
             label = it['type'][0].upper() if it['type'] != 'heal' else 'H'
             txt = font_small.render(label, True, BLACK)
             screen.blit(txt, (it['rect'].x + 5, it['rect'].y))
         
-        if (invincible // 5) % 2 == 0: draw_player(screen, player)
+        if (invincible // 5) % 2 == 0: 
+            draw_player(screen, player)
             
         draw_hud(score, hp, elapsed_seconds, cur_e_hp, cur_e_dmg, p_dmg, p_fire_rate, p_move)
         pygame.display.flip()
