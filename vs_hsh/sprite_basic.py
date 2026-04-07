@@ -9,15 +9,15 @@ clock = pygame.time.Clock()
 img = pygame.image.load("./assets/images/player.png").convert_alpha()
 
 # ── ② 크기 조절 ────────────────────────────────
-# img = pygame.transform.scale(img, (96, 96))
+img = pygame.transform.scale(img, (96, 96))
 
 # ── ③ Rect로 위치 지정 ─────────────────────────
 rect = img.get_rect()
 rect.center = (200, 150)  # 화면 중앙
 
 # ── ④ 회전 ─────────────────────────────────────
-# img = pygame.transform.rotate(img, 45)  # 45도 반시계
-# rect = img.get_rect(center=rect.center)  # 회전 후 중심 유지
+img = pygame.transform.rotate(img, 45)  # 45도 반시계
+rect = img.get_rect(center=rect.center)  # 회전 후 중심 유지
 
 running = True
 while running:

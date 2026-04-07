@@ -10,14 +10,14 @@ clock = pygame.time.Clock()
 shoot_sound = pygame.mixer.Sound("assets/sounds/lazer.wav")
 
 # ── ② 배경음악 로드 ────────────────────────────
-# pygame.mixer.music.load("code/assets/sounds/bgm.mp3")
+pygame.mixer.music.load("assets/sounds/bgm.mp3")
 
 # ── ③ 볼륨 조절 ────────────────────────────────
-# shoot_sound.set_volume(0.5)        # 0.0 ~ 1.0
-# pygame.mixer.music.set_volume(0.3)
+shoot_sound.set_volume(1)        # 0.0 ~ 1.0
+pygame.mixer.music.set_volume(0.3)
 
 # ── ④ 배경음악 재생 ────────────────────────────
-# pygame.mixer.music.play(-1)  # -1: 무한 반복
+pygame.mixer.music.play(-1)  # -1: 무한 반복
 
 running = True
 while running:
