@@ -31,14 +31,22 @@ DRONE_W, DRONE_H = 22, 22
 
 def load_image(file_name, width, height):
     try:
+        if not os.path.exists(file_name):
+            print(f"파일을 찾을 수 없습니다: {file_name}")
+            return None
         img = pygame.image.load(file_name).convert_alpha()
+        print(f"파일을 찾았다: {file_name}")
         return pygame.transform.scale(img, (width, height))
-    except: return None
+    except Exception as e:
+        print(f"이미지 로드 에러 ({file_name}): {e}")
+        return None
 
 def load_sound(file_name):
     try: return pygame.mixer.Sound(file_name)
     except: return None
 
+# os.chdir(os.path.dirname(os.path.abspath(__file__)))
+# print(os.getcwd())
 # 이미지 및 사운드 로드
 PLAYER_IMAGE = load_image("./assets/images/player.png", PLAYER_W, PLAYER_H)
 BULLET_IMAGE = load_image("./assets/images/lazer.png", BULLET_W, BULLET_H)
