@@ -10,7 +10,6 @@ pygame.mixer.init()
 # --- 설정 및 상수 ---
 WIDTH, HEIGHT = 800, 600
 FPS = 60
-
 WHITE   = (255, 255, 255)
 BLACK   = (0,   0,   0)
 GRAY    = (20,  20,  40)
@@ -22,13 +21,13 @@ ORANGE  = (255, 165, 0)
 PURPLE  = (160, 32, 240)
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Space Shooter - Drone System Fixed")
+pygame.display.set_caption("Space Shooter - Drone System")
 clock = pygame.time.Clock()
 
 # --- 리소스 로드 함수 ---
 PLAYER_W, PLAYER_H = 45, 45
 BULLET_W, BULLET_H = 15, 30
-DRONE_W, DRONE_H = 22, 22 
+DRONE_W, DRONE_H = 22, 22
 
 def load_image(file_name, width, height):
     try:
@@ -68,8 +67,7 @@ def get_difficulty(elapsed_seconds):
     enemy_hp = 1 + (elapsed_seconds / 20)
     return speed, spawn_delay, enemy_hp
 
-# --- [중요] 그리기 함수들 (여기에 정의되어 있어야 합니다) ---
-
+# --- 그리기 함수들 ---
 def draw_player(surf, rect):
     if PLAYER_IMAGE: surf.blit(PLAYER_IMAGE, rect.topleft)
     else: pygame.draw.polygon(surf, BLUE, [(rect.centerx, rect.top), (rect.left, rect.bottom), (rect.right, rect.bottom)])
@@ -79,14 +77,11 @@ def draw_drone(surf, rect):
     pygame.draw.circle(surf, WHITE, (rect.centerx - 4, rect.centery - 4), 3) # 광택
     pygame.draw.circle(surf, WHITE, rect.center, DRONE_W // 2, 2)
 
-# 오류가 났던 함수입니다.
 def draw_enemy(surf, enemy_obj):
     rect = enemy_obj['rect']
     hp_ratio = enemy_obj['hp'] / enemy_obj['max_hp']
-    # 체력에 따라 색상 변경 (기본 빨간색 계열)
     color = (max(50, 255 - (int(enemy_obj['max_hp']) * 20)), 50, 50)
     pygame.draw.rect(surf, color, rect, border_radius=5)
-    # 적 머리 위에 작은 체력바 표시
     if enemy_obj['max_hp'] > 1:
         pygame.draw.rect(surf, RED, (rect.x, rect.y - 10, rect.width, 4))
         pygame.draw.rect(surf, GREEN, (rect.x, rect.y - 10, rect.width * hp_ratio, 4))
@@ -94,10 +89,9 @@ def draw_enemy(surf, enemy_obj):
 def draw_hud(score, hp, drone_count, drone_spread):
     screen.blit(font.render(f"Score: {score}", True, WHITE), (20, 20))
     screen.blit(font_small.render(f"Drones: {drone_count} | Spread: {int(drone_spread)}", True, PURPLE), (20, 50))
-    # 치트키 안내
     cheat_txt = "[F1:Random Item] [F2:Drone Item] [F3:Inst Drone] [F4:Clear]"
     screen.blit(font_small.render(cheat_txt, True, (100, 255, 100)), (20, HEIGHT - 30))
-
+    
     bar_width = 200
     pygame.draw.rect(screen, (100, 0, 0), (WIDTH - bar_width - 20, 25, bar_width, 20))
     pygame.draw.rect(screen, GREEN, (WIDTH - bar_width - 20, 25, max(0, (hp / MAX_HP) * bar_width), 20))
@@ -110,18 +104,18 @@ def main():
     p_dmg = 1
     p_fire_rate = 15
     p_move = 6
-    
+
     drones = []
-    drone_spread = 80
-    
+    drone_spread = 60 # 우주선과 드론, 드론들 사이의 기본 간격
+
     bullets = []
     enemies = []
     items = []
-    
+
     spawn_timer = 0
     invincible = 0
     shoot_cd = 0
-    
+
     start_ticks = pygame.time.get_ticks()
     stars = [[random.randint(0, WIDTH), random.randint(0, HEIGHT), random.randint(1, 2)] for _ in range(60)]
 
@@ -155,8 +149,10 @@ def main():
         if keys[pygame.K_RIGHT] and player.right < WIDTH: player.x += p_move
         if keys[pygame.K_UP] and player.top > 0: player.y -= p_move
         if keys[pygame.K_DOWN] and player.bottom < HEIGHT: player.y += p_move
-        if keys[pygame.K_z]: drone_spread = max(30, drone_spread - 2)
-        if keys[pygame.K_x]: drone_spread = min(250, drone_spread + 2)
+        
+        # Z, X로 전체적인 간격(우주선-드론, 드론-드론) 조절
+        if keys[pygame.K_z]: drone_spread = max(10, drone_spread - 2)
+        if keys[pygame.K_x]: drone_spread = min(300, drone_spread + 2)
 
         # 발사
         shoot_cd -= 1
@@ -165,17 +161,23 @@ def main():
             shoot_cd = p_fire_rate
             if SHOOT_SOUND: SHOOT_SOUND.play()
 
-        # 드론 업데이트 (부드러운 움직임)
+        # 드론 업데이트 (우주선과의 거리 + 드론간 거리 모두 유동적)
         t = pygame.time.get_ticks() / 1000.0
         for i, dn in enumerate(drones):
             side = -1 if i % 2 == 0 else 1
-            row = (i // 2) + 1
+            row = (i // 2) +1 # 1, 2, 3...
+            
             float_y = math.sin(t * 2.0 + i) * 12.0 + math.sin(t * 4.5 + i * 0.5) * 4.0
             float_x = math.cos(t * 1.5 + i) * 6.0
-            target_x = player.centerx + side * (drone_spread + (row-1) * 30) + float_x
-            target_y = player.centery + (row * 45) + float_y
-            dn['px'] += (target_x - dn['px']) * 0.06
-            dn['py'] += (target_y - dn['py']) * 0.06
+            
+            # target_x: 우주선 중심에서 (drone_spread * row)만큼 떨어짐
+            # 이 식을 통해 우주선-드론 거리와 드론-드론 거리가 spread 값에 따라 함께 움직입니다.
+            target_x = player.centerx + side * (drone_spread * row) + float_x
+            target_y = player.centery + (row * 15) + float_y # 세로 배치도 약간 조절
+            
+            # 부드러운 따라오기
+            dn['px'] += (target_x - dn['px']) * 0.08
+            dn['py'] += (target_y - dn['py']) * 0.08
             dn['rect'].centerx, dn['rect'].centery = int(dn['px']), int(dn['py'])
             
             dn['shoot_cd'] -= 1
@@ -184,21 +186,24 @@ def main():
                 dn['shoot_cd'] = p_fire_rate * 2.5
                 if SHOOT_SOUND: SHOOT_SOUND.play()
 
-        # 총알/적/아이템 로직
+        # 총알 로직
         for b in bullets[:]:
             b['rect'].y -= 12
             if b['rect'].bottom < 0: bullets.remove(b)
 
+        # 적 스폰
         spawn_timer += 1
         if spawn_timer >= cur_spawn_delay:
             spawn_timer = 0
             enemies.append({'rect': pygame.Rect(random.randint(0, WIDTH-ENEMY_W), -ENEMY_H, ENEMY_W, ENEMY_H),
                             'hp': cur_e_hp, 'max_hp': cur_e_hp})
 
+        # 적 이동
         for en in enemies[:]:
             en['rect'].y += cur_speed
             if en['rect'].top > HEIGHT: enemies.remove(en)
 
+        # 아이템 로직
         for it in items[:]:
             it['rect'].y += 3
             if it['rect'].colliderect(player):
@@ -248,7 +253,7 @@ def main():
             if BULLET_IMAGE: screen.blit(BULLET_IMAGE, b['rect'].topleft)
             else: pygame.draw.rect(screen, YELLOW, b['rect'])
             
-        for en in enemies: draw_enemy(screen, en) # 여기서 오류가 났었습니다.
+        for en in enemies: draw_enemy(screen, en)
         for dn in drones: draw_drone(screen, dn['rect'])
         
         for it in items:
