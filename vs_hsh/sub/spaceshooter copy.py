@@ -102,12 +102,13 @@ class PermanentUpgrades:
     def can_buy(self, item_id):
         for it in SHOP_ITEMS:
             if it[0] == item_id:
-                return (self.purchased[item_id] < it[3]) and (self.coins >= it[3])
+                price, max_buy = it[3], it[4]
+                return (self.purchased[item_id] < max_buy) and (self.coins >= price)
         return False
     def buy(self, item_id):
         for it in SHOP_ITEMS:
             if it[0] == item_id and self.can_buy(item_id):
-                self.coins -= it[3]
+                self.coins -= it[3]  # it[3] = price
                 self.purchased[item_id] += 1
                 return True
         return False
@@ -442,6 +443,8 @@ def main():
                                        'px': float(player.centerx), 'py': float(player.centery), 'shoot_cd': 30})
                 if e.key == pygame.K_F4:
                     drones.clear()
+                if e.key == pygame.K_F5:
+                    coins_earned+=1000
 
         # 조작
         keys = pygame.key.get_pressed()
