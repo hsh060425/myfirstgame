@@ -1,7 +1,6 @@
 import pygame
 import random
 import sys
-import os
 import math
 
 pygame.init()
@@ -21,17 +20,22 @@ ORANGE  = (255, 165, 0)
 PURPLE  = (160, 32, 240)
 DARK_PURPLE = (60, 0, 100)
 GOLD    = (255, 200, 0)
+CYAN    = (0, 255, 255)
+MAGENTA = (255, 0, 255)
 PANEL   = (15, 15, 35)
 PANEL2  = (25, 25, 55)
 BORDER  = (80, 80, 160)
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Space Shooter - Drone System")
+pygame.display.set_caption("Space Shooter - Boss & Drone System")
 clock = pygame.time.Clock()
 
 PLAYER_W, PLAYER_H = 45, 45
 BULLET_W, BULLET_H = 15, 30
 DRONE_W, DRONE_H = 22, 22
+ENEMY_W, ENEMY_H = 40, 40
+ITEM_SIZE = 20
+MAX_HP = 100
 
 def load_image(file_name, width, height):
     try:
@@ -60,10 +64,6 @@ font       = get_korean_font(25)
 font_med   = get_korean_font(32)
 font_big   = get_korean_font(70)
 
-ENEMY_W, ENEMY_H = 40, 40
-ITEM_SIZE = 20
-MAX_HP = 100
-
 def get_difficulty(elapsed_seconds):
     speed = min(12.0, 2.0 + (elapsed_seconds / 15))
     spawn_delay = max(6, 60 - (elapsed_seconds / 3))
@@ -71,7 +71,7 @@ def get_difficulty(elapsed_seconds):
     return speed, spawn_delay, enemy_hp
 
 # ─────────────────────────────────────────────
-# 상점 데이터 정의
+# 상점 데이터 정의 (+ 보스 전용 카테고리 추가)
 # ─────────────────────────────────────────────
 SHOP_ITEMS = [
     # (id, 이름, 설명, 가격, 최대구매, 카테고리)
@@ -87,33 +87,90 @@ SHOP_ITEMS = [
     ("item_boost",    "아이템 효과 +1",  "스탯 아이템의\n효과 +1 증가",              110, 3, "특수"),
     ("score_boost",   "점수 보너스 +5",  "적 처치 시 획득\n점수 +5 증가",             50,  5, "특수"),
     ("start_drone",   "시작 드론 +1",    "게임 시작 시\n드론 1개 지급",              120, 3, "드론"),
+    # --- 보스 전용 (보스 크리스탈 소모) ---
+    ("boss_dmg",      "보스 킬러",       "보스에게 주는 피해\n+5 증가\n[크리스탈 소모]", 1,  5, "보스"),
+    ("boss_shield",   "보스 방어",       "보스 탄막에 받는\n피해 -5 감소\n[크리스탈 소모]", 1,  3, "보스"),
+    ("boss_heal",     "보스전 승전보",   "보스 처치 시\nHP 50 즉시 회복\n[크리스탈 소모]", 2,  2, "보스"),
 ]
 
-# ─────────────────────────────────────────────
-# 영구 업그레이드 저장소 (게임 세션 간 유지)
-# ─────────────────────────────────────────────
 class PermanentUpgrades:
     def __init__(self):
         self.coins = 0
+        self.boss_crystals = 0  # 보스 전용 재화 추가
         self.total_score = 0
         self.purchased = {item[0]: 0 for item in SHOP_ITEMS}
 
     def get(self, key): return self.purchased.get(key, 0)
+    
     def can_buy(self, item_id):
         for it in SHOP_ITEMS:
             if it[0] == item_id:
-                price, max_buy = it[3], it[4]
-                return (self.purchased[item_id] < max_buy) and (self.coins >= price)
+                price, max_buy, cat = it[3], it[4], it[5]
+                if self.purchased[item_id] >= max_buy: return False
+                if cat == "보스": return self.boss_crystals >= price
+                else:             return self.coins >= price
         return False
+        
     def buy(self, item_id):
         for it in SHOP_ITEMS:
             if it[0] == item_id and self.can_buy(item_id):
-                self.coins -= it[3]  # it[3] = price
+                if it[5] == "보스": self.boss_crystals -= it[3]
+                else:             self.coins -= it[3]
                 self.purchased[item_id] += 1
                 return True
         return False
 
 upgrades = PermanentUpgrades()
+
+# ─────────────────────────────────────────────
+# 보스 클래스 정의
+# ─────────────────────────────────────────────
+class Boss:
+    def __init__(self, level):
+        self.w, self.h = 100, 80
+        self.rect = pygame.Rect(WIDTH//2 - self.w//2, -self.h, self.w, self.h)
+        self.max_hp = 300 + (level * 150)
+        self.hp = self.max_hp
+        self.timer = 0
+
+    def update(self, player_rect, boss_bullets):
+        self.timer += 1
+        
+        # 등장 및 기본 이동
+        if self.rect.y < 50:
+            self.rect.y += 2
+        else:
+            self.rect.x = (WIDTH//2 - self.w//2) + math.sin(self.timer * 0.03) * 200
+
+            # 패턴 1: 조준 사격 (빠름) - 100 프레임마다
+            if self.timer % 100 == 0:
+                angle = math.atan2(player_rect.centery - self.rect.centery, player_rect.centerx - self.rect.centerx)
+                boss_bullets.append({'rect': pygame.Rect(self.rect.centerx-6, self.rect.centery-6, 12, 12),
+                                     'vx': math.cos(angle)*7, 'vy': math.sin(angle)*7, 'type': 'aim'})
+            
+            # 패턴 2: 방사형 탄막 - 160 프레임마다
+            if self.timer % 160 == 0:
+                for i in range(12):
+                    angle = i * (math.pi / 6)
+                    boss_bullets.append({'rect': pygame.Rect(self.rect.centerx-5, self.rect.centery-5, 10, 10),
+                                         'vx': math.cos(angle)*4, 'vy': math.sin(angle)*4, 'type': 'spread'})
+            
+            # 패턴 3: 십자 블라스트 (상하좌우 거대 투사체) - 250 프레임마다
+            if self.timer % 250 == 0:
+                angles = [0, math.pi/2, math.pi, math.pi*3/2]
+                for ang in angles:
+                    boss_bullets.append({'rect': pygame.Rect(self.rect.centerx-15, self.rect.centery-15, 30, 30),
+                                         'vx': math.cos(ang)*12, 'vy': math.sin(ang)*12, 'type': 'blast'})
+
+    def draw(self, surf):
+        # 보스 본체
+        pygame.draw.rect(surf, DARK_PURPLE, self.rect, border_radius=10)
+        pygame.draw.rect(surf, MAGENTA, self.rect, 3, border_radius=10)
+        
+        # 보스 체력바
+        hp_ratio = max(0, self.hp / self.max_hp)
+        pygame.draw.rect(surf, BLACK, (self.rect.x, self.rect.y - 15, self.w, 8))
+        pygame.draw.rect(surf, RED, (self.rect.x, self.rect.y - 15, self.w * hp_ratio, 8))
 
 # ─────────────────────────────────────────────
 # 드로잉 유틸
@@ -136,12 +193,14 @@ def draw_enemy(surf, enemy_obj):
         pygame.draw.rect(surf, RED, (rect.x, rect.y - 10, rect.width, 4))
         pygame.draw.rect(surf, GREEN, (rect.x, rect.y - 10, rect.width * hp_ratio, 4))
 
-def draw_hud(score, hp, max_hp, drone_count, drone_spread, coins):
+def draw_hud(score, hp, max_hp, drone_count, drone_spread, coins, crystals):
     screen.blit(font.render(f"Score: {score}", True, WHITE), (20, 20))
     screen.blit(font_small.render(f"Drones: {drone_count} | Spread: {int(drone_spread)}", True, PURPLE), (20, 50))
-    screen.blit(font_small.render(f"💰 {coins}", True, GOLD), (20, 70))
+    screen.blit(font_small.render(f"💰 {coins}   💎 {crystals}", True, GOLD), (20, 70))
+    
     cheat_txt = "[F1:Random Item] [F2:Drone Item] [F3:Inst Drone] [F4:Clear]"
     screen.blit(font_small.render(cheat_txt, True, (100, 255, 100)), (20, HEIGHT - 30))
+    
     bar_width = 200
     pygame.draw.rect(screen, (100, 0, 0), (WIDTH - bar_width - 20, 25, bar_width, 20))
     pygame.draw.rect(screen, GREEN, (WIDTH - bar_width - 20, 25, max(0, (hp / max_hp) * bar_width), 20))
@@ -160,20 +219,20 @@ def draw_button(surf, rect, text, color, hover=False):
 # ─────────────────────────────────────────────
 # 사망 화면
 # ─────────────────────────────────────────────
-def death_screen(score, coins_earned):
+def death_screen(score, coins_earned, crystals_earned):
     upgrades.coins += coins_earned
+    upgrades.boss_crystals += crystals_earned
     upgrades.total_score += score
 
     overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 180))
 
-    btn_shop    = pygame.Rect(WIDTH//2 - 160, 340, 140, 55)
-    btn_retry   = pygame.Rect(WIDTH//2 - 0,   340, 140, 55)
-    btn_quit    = pygame.Rect(WIDTH//2 + 160, 340, 140, 55)
-    # 센터 보정
-    btn_shop.centerx    = WIDTH//2 - 170
-    btn_retry.centerx   = WIDTH//2
-    btn_quit.centerx    = WIDTH//2 + 170
+    btn_shop    = pygame.Rect(WIDTH//2 - 170, 370, 140, 55)
+    btn_retry   = pygame.Rect(WIDTH//2 - 70,  370, 140, 55)
+    btn_quit    = pygame.Rect(WIDTH//2 + 30,  370, 140, 55)
+    btn_shop.centerx  = WIDTH//2 - 170
+    btn_retry.centerx = WIDTH//2
+    btn_quit.centerx  = WIDTH//2 + 170
 
     anim = 0
     stars = [[random.randint(0, WIDTH), random.randint(0, HEIGHT), random.randint(1,2)] for _ in range(60)]
@@ -192,7 +251,6 @@ def death_screen(score, coins_earned):
                 if btn_retry.collidepoint(mx, my): return "retry"
                 if btn_quit.collidepoint(mx, my): pygame.quit(); sys.exit()
 
-        # 배경
         screen.fill(GRAY)
         for s in stars:
             s[1] += 0.5
@@ -200,20 +258,20 @@ def death_screen(score, coins_earned):
             pygame.draw.circle(screen, (70, 70, 100), (int(s[0]), int(s[1])), s[2])
         screen.blit(overlay, (0, 0))
 
-        # 제목
         shake = math.sin(anim * 0.1) * 3
         title = font_big.render("GAME OVER", True, RED)
-        screen.blit(title, title.get_rect(centerx=WIDTH//2, centery=180 + shake))
+        screen.blit(title, title.get_rect(centerx=WIDTH//2, centery=160 + shake))
 
-        # 점수
         sc_txt  = font_med.render(f"Score: {score}", True, WHITE)
-        cn_txt  = font_med.render(f"획득 코인: {coins_earned}  (보유: {upgrades.coins})", True, GOLD)
+        cn_txt  = font_med.render(f"획득 코인: {coins_earned} (보유: {upgrades.coins})", True, GOLD)
+        cr_txt  = font_med.render(f"획득 크리스탈: {crystals_earned} (보유: {upgrades.boss_crystals})", True, CYAN)
         tot_txt = font_small.render(f"누적 점수: {upgrades.total_score}", True, (160, 160, 200))
-        screen.blit(sc_txt,  sc_txt.get_rect(centerx=WIDTH//2, centery=265))
-        screen.blit(cn_txt,  cn_txt.get_rect(centerx=WIDTH//2, centery=300))
-        screen.blit(tot_txt, tot_txt.get_rect(centerx=WIDTH//2, centery=328))
+        
+        screen.blit(sc_txt,  sc_txt.get_rect(centerx=WIDTH//2, centery=245))
+        screen.blit(cn_txt,  cn_txt.get_rect(centerx=WIDTH//2, centery=285))
+        screen.blit(cr_txt,  cr_txt.get_rect(centerx=WIDTH//2, centery=320))
+        screen.blit(tot_txt, tot_txt.get_rect(centerx=WIDTH//2, centery=350))
 
-        # 버튼
         draw_button(screen, btn_shop,  "🛒 상점",  DARK_PURPLE, btn_shop.collidepoint(mx, my))
         draw_button(screen, btn_retry, "▶ 다시하기", (0,80,0),  btn_retry.collidepoint(mx, my))
         draw_button(screen, btn_quit,  "✕ 나가기",  (80,0,0),  btn_quit.collidepoint(mx, my))
@@ -233,12 +291,11 @@ def shop_screen():
     buy_msg = ""
     buy_msg_timer = 0
 
-    categories = ["전체", "공격", "드론", "방어", "특수"]
+    categories = ["전체", "공격", "드론", "방어", "특수", "보스"]
     sel_cat = "전체"
     cat_rects = []
 
     stars = [[random.randint(0, WIDTH), random.randint(0, HEIGHT), random.randint(1, 2)] for _ in range(60)]
-
     btn_back = pygame.Rect(WIDTH - 140, HEIGHT - 60, 120, 40)
 
     while True:
@@ -252,12 +309,10 @@ def shop_screen():
 
             if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
                 if btn_back.collidepoint(mx, my): return
-                # 카테고리 탭
                 for i, cr in enumerate(cat_rects):
                     if cr.collidepoint(mx, my):
                         sel_cat = categories[i]; scroll = 0
 
-                # 아이템 카드 클릭
                 filtered = [it for it in SHOP_ITEMS if sel_cat == "전체" or it[5] == sel_cat]
                 for idx, item in enumerate(filtered):
                     col = idx % COLS
@@ -265,19 +320,20 @@ def shop_screen():
                     cx = GRID_X + col * (CARD_W + PAD)
                     cy = GRID_Y + row * (CARD_H + PAD) - scroll
                     card_rect = pygame.Rect(cx, cy, CARD_W, CARD_H)
+                    
                     if card_rect.collidepoint(mx, my):
                         if upgrades.can_buy(item[0]):
                             upgrades.buy(item[0])
                             buy_msg = f"✅ {item[1]} 구매 완료!"
-                        elif upgrades.purchased[item[0]] >= item[3]:
+                        elif upgrades.purchased[item[0]] >= item[4]:
                             buy_msg = "❌ 최대 구매 횟수 도달"
                         else:
-                            buy_msg = f"❌ 코인 부족! (필요: {item[3]})"
+                            재화명 = "크리스탈" if item[5] == "보스" else "코인"
+                            buy_msg = f"❌ {재화명} 부족! (필요: {item[3]})"
                         buy_msg_timer = 120
 
         buy_msg_timer = max(0, buy_msg_timer - 1)
 
-        # --- 그리기 ---
         screen.fill(PANEL)
         for s in stars:
             s[1] += 0.3
@@ -289,23 +345,27 @@ def shop_screen():
         pygame.draw.line(screen, BORDER, (0, 55), (WIDTH, 55), 2)
         title_s = font_med.render("🛒  업그레이드 상점", True, WHITE)
         screen.blit(title_s, title_s.get_rect(centery=27, x=20))
-        coin_s = font_med.render(f"💰 {upgrades.coins}", True, GOLD)
+        
+        # 재화 표시
+        coin_s = font_med.render(f"💰 {upgrades.coins}   💎 {upgrades.boss_crystals}", True, GOLD)
         screen.blit(coin_s, coin_s.get_rect(centery=27, right=WIDTH - 20))
 
         # 카테고리 탭
         cat_rects.clear()
         for i, cat in enumerate(categories):
             cr = pygame.Rect(20 + i * 110, 65, 100, 30)
+            if cat == "보스": cr.x += 10 # 탭 간격 미세조정
             cat_rects.append(cr)
             is_sel = cat == sel_cat
             pygame.draw.rect(screen, BORDER if is_sel else PANEL2, cr, border_radius=6)
             if is_sel: pygame.draw.rect(screen, WHITE, cr, 2, border_radius=6)
-            ct = font_small.render(cat, True, WHITE if is_sel else (160,160,200))
+            
+            txt_color = CYAN if cat == "보스" else (WHITE if is_sel else (160,160,200))
+            ct = font_small.render(cat, True, txt_color)
             screen.blit(ct, ct.get_rect(center=cr.center))
 
-        # 아이템 카드
+        # 아이템 카드 렌더링
         filtered = [it for it in SHOP_ITEMS if sel_cat == "전체" or it[5] == sel_cat]
-        # 클리핑 영역
         clip_rect = pygame.Rect(0, GRID_Y - 10, WIDTH, HEIGHT - GRID_Y - 60)
         screen.set_clip(clip_rect)
 
@@ -318,38 +378,36 @@ def shop_screen():
             card_rect = pygame.Rect(cx, cy, CARD_W, CARD_H)
 
             bought = upgrades.purchased[iid]
-            affordable = upgrades.coins >= price
+            is_boss_item = (cat == "보스")
+            affordable = (upgrades.boss_crystals >= price) if is_boss_item else (upgrades.coins >= price)
             maxed = bought >= max_buy
             hovered = card_rect.collidepoint(mx, my)
 
-            # 카드 배경
             card_col = (40, 40, 70) if not maxed else (40, 60, 40)
             if hovered and not maxed: card_col = (60, 60, 110)
             pygame.draw.rect(screen, card_col, card_rect, border_radius=10)
+            
             border_c = GOLD if hovered and not maxed else ((0,180,0) if maxed else BORDER)
             pygame.draw.rect(screen, border_c, card_rect, 2, border_radius=10)
 
             # 카테고리 배지
-            cat_colors = {"공격": RED, "드론": PURPLE, "방어": BLUE, "특수": ORANGE}
+            cat_colors = {"공격": RED, "드론": PURPLE, "방어": BLUE, "특수": ORANGE, "보스": MAGENTA}
             badge_col = cat_colors.get(cat, GRAY)
             badge = pygame.Rect(cx + 5, cy + 5, 40, 16)
             pygame.draw.rect(screen, badge_col, badge, border_radius=4)
             screen.blit(font_small.render(cat, True, WHITE), (badge.x + 3, badge.y + 1))
 
-            # 이름
+            # 아이템 이름 및 설명
             n_s = font_small.render(name, True, WHITE)
             screen.blit(n_s, n_s.get_rect(centerx=cx + CARD_W//2, y=cy + 27))
 
-            # 설명 (줄바꿈)
             for li, line in enumerate(desc.split('\n')):
                 d_s = font_small.render(line, True, (180, 180, 220))
                 screen.blit(d_s, d_s.get_rect(centerx=cx + CARD_W//2, y=cy + 52 + li * 18))
 
-            # 구매 횟수
             prog = font_small.render(f"{bought}/{max_buy}", True, GOLD if not maxed else GREEN)
             screen.blit(prog, prog.get_rect(centerx=cx + CARD_W//2, y=cy + CARD_H - 46))
 
-            # 가격 / 최대 버튼
             if maxed:
                 pygame.draw.rect(screen, (0, 100, 0), pygame.Rect(cx + 15, cy + CARD_H - 30, CARD_W - 30, 22), border_radius=5)
                 screen.blit(font_small.render("MAX ✔", True, GREEN),
@@ -357,35 +415,41 @@ def shop_screen():
             else:
                 btn_col = (0, 120, 0) if affordable else (80, 0, 0)
                 pygame.draw.rect(screen, btn_col, pygame.Rect(cx + 10, cy + CARD_H - 30, CARD_W - 20, 22), border_radius=5)
-                price_s = font_small.render(f"💰 {price}", True, GOLD if affordable else (160,80,80))
+                
+                # 보스 아이템은 다이아 아이콘 사용
+                price_text = f"💎 {price}" if is_boss_item else f"💰 {price}"
+                price_color = CYAN if is_boss_item else GOLD
+                if not affordable: price_color = (160,80,80)
+                
+                price_s = font_small.render(price_text, True, price_color)
                 screen.blit(price_s, price_s.get_rect(centerx=cx + CARD_W//2, centery=cy + CARD_H - 19))
 
         screen.set_clip(None)
 
-        # 구매 메시지
         if buy_msg_timer > 0:
             alpha = min(255, buy_msg_timer * 4)
             msg_s = font_med.render(buy_msg, True, GREEN if "✅" in buy_msg else RED)
             msg_s.set_alpha(alpha)
             screen.blit(msg_s, msg_s.get_rect(centerx=WIDTH//2, centery=HEIGHT - 75))
 
-        # 뒤로가기 버튼
         draw_button(screen, btn_back, "← 돌아가기", DARK_PURPLE, btn_back.collidepoint(mx, my))
-
         pygame.display.flip()
 
 # ─────────────────────────────────────────────
 # 메인 게임 루프
 # ─────────────────────────────────────────────
 def main():
-    # 업그레이드 적용 초기값
     player = pygame.Rect(WIDTH//2 - PLAYER_W//2, HEIGHT-70, PLAYER_W, PLAYER_H)
     
+    # 일반 스탯
     p_dmg      = 1 + upgrades.get("dmg_up")
     p_fire_rate = max(4, 15 - upgrades.get("fire_rate_up"))
     p_move     = min(12, 6 + upgrades.get("move_up") * 0.5)
-    bullet_count = 1 + upgrades.get("bullet_count")   # 동시 발사 총알 수
-    
+    bullet_count = 1 + upgrades.get("bullet_count")
+    max_hp = MAX_HP + upgrades.get("max_hp_up") * 20
+    hp = max_hp
+
+    # 드론 & 특수 스탯
     drone_dmg_bonus  = upgrades.get("drone_dmg")
     drone_rate_bonus = upgrades.get("drone_rate")
     item_drop_bonus  = upgrades.get("item_drop") * 0.05
@@ -393,24 +457,31 @@ def main():
     score_bonus      = upgrades.get("score_boost") * 5
     max_drone_slots  = 3 + upgrades.get("drone_slot")
 
-    max_hp = MAX_HP + upgrades.get("max_hp_up") * 20
-    hp = max_hp
+    # 보스 전용 스탯 적용
+    boss_dmg_bonus = upgrades.get("boss_dmg") * 5
+    boss_shield    = upgrades.get("boss_shield") * 5
+    boss_heal_amt  = upgrades.get("boss_heal") * 50
 
     score = 0
     coins_earned = 0
+    crystals_earned = 0
 
     drones = []
-    # 시작 드론 지급
     for _ in range(upgrades.get("start_drone")):
         if len(drones) < max_drone_slots:
             drones.append({'rect': pygame.Rect(0, 0, DRONE_W, DRONE_H),
                            'px': float(player.centerx), 'py': float(player.centery), 'shoot_cd': 30})
 
     drone_spread = 60
-
     bullets = []
     enemies = []
     items = []
+
+    # 보스 관련 변수
+    boss = None
+    boss_level = 1
+    next_boss_score = 500
+    boss_bullets = []
 
     spawn_timer = 0
     invincible = 0
@@ -418,7 +489,6 @@ def main():
 
     start_ticks = pygame.time.get_ticks()
     stars = [[random.randint(0, WIDTH), random.randint(0, HEIGHT), random.randint(1, 2)] for _ in range(60)]
-
     base_drop_chance = 0.25
 
     while True:
@@ -439,12 +509,9 @@ def main():
                                   'type': 'drone', 'color': PURPLE})
                 if e.key == pygame.K_F3:
                     if len(drones) < max_drone_slots:
-                        drones.append({'rect': pygame.Rect(0, 0, DRONE_W, DRONE_H),
-                                       'px': float(player.centerx), 'py': float(player.centery), 'shoot_cd': 30})
-                if e.key == pygame.K_F4:
-                    drones.clear()
-                if e.key == pygame.K_F5:
-                    coins_earned+=1000
+                        drones.append({'rect': pygame.Rect(0, 0, DRONE_W, DRONE_H), 'px': float(player.centerx), 'py': float(player.centery), 'shoot_cd': 30})
+                if e.key == pygame.K_F4: drones.clear()
+                if e.key == pygame.K_F5: score += 500 # 보스 테스트용 치트
 
         # 조작
         keys = pygame.key.get_pressed()
@@ -455,16 +522,12 @@ def main():
         if keys[pygame.K_z]: drone_spread = max(10, drone_spread - 2)
         if keys[pygame.K_x]: drone_spread = min(300, drone_spread + 2)
 
-        # 발사 (멀티샷)
+        # 발사 로직
         shoot_cd -= 1
         if keys[pygame.K_SPACE] and shoot_cd <= 0:
-            # 총알 수에 따라 균등 분산
             for bi in range(bullet_count):
-                if bullet_count == 1:
-                    bx = player.centerx - BULLET_W // 2
-                else:
-                    spread_px = (bullet_count - 1) * 12
-                    bx = player.centerx - spread_px // 2 + bi * 12 - BULLET_W // 2
+                if bullet_count == 1: bx = player.centerx - BULLET_W // 2
+                else: bx = player.centerx - ((bullet_count - 1) * 12) // 2 + bi * 12 - BULLET_W // 2
                 bullets.append({'rect': pygame.Rect(bx, player.top - BULLET_H, BULLET_W, BULLET_H), 'dmg': p_dmg})
             shoot_cd = p_fire_rate
             if SHOOT_SOUND: SHOOT_SOUND.play()
@@ -487,21 +550,55 @@ def main():
                 bullets.append({'rect': pygame.Rect(dn['rect'].centerx - BULLET_W//2, dn['rect'].top - BULLET_H, BULLET_W, BULLET_H),
                                  'dmg': p_dmg + drone_dmg_bonus})
                 dn['shoot_cd'] = eff_drone_fire_rate
-                if SHOOT_SOUND: SHOOT_SOUND.play()
 
         # 총알 이동
         for b in bullets[:]:
             b['rect'].y -= 12
             if b['rect'].bottom < 0: bullets.remove(b)
 
-        # 적 스폰
-        spawn_timer += 1
-        if spawn_timer >= cur_spawn_delay:
-            spawn_timer = 0
-            enemies.append({'rect': pygame.Rect(random.randint(0, WIDTH-ENEMY_W), -ENEMY_H, ENEMY_W, ENEMY_H),
-                            'hp': cur_e_hp, 'max_hp': cur_e_hp})
+        # =======================================================
+        # 보스 시스템 로직
+        # =======================================================
+        if score >= next_boss_score and boss is None:
+            boss = Boss(boss_level)
+            boss_bullets.clear()
+            enemies.clear() # 보스 등장 시 일반 적 초기화
 
-        # 적 이동
+        if boss:
+            boss.update(player, boss_bullets)
+            
+            # 보스 탄막 이동 및 플레이어 충돌
+            for bb in boss_bullets[:]:
+                bb['rect'].x += bb['vx']
+                bb['rect'].y += bb['vy']
+                if not (0 <= bb['rect'].centerx <= WIDTH and 0 <= bb['rect'].centery <= HEIGHT):
+                    boss_bullets.remove(bb)
+                    continue
+                
+                if invincible <= 0 and bb['rect'].colliderect(player):
+                    dmg = 20 - boss_shield # 보스 방어 업그레이드 적용
+                    hp -= max(5, dmg)
+                    invincible = 60
+                    boss_bullets.remove(bb)
+                    if hp <= 0:
+                        if death_screen(score, coins_earned, crystals_earned) == "retry": main(); return
+            
+            # 플레이어 몸통박치기 (보스와)
+            if invincible <= 0 and player.colliderect(boss.rect):
+                hp -= 30
+                invincible = 60
+                if hp <= 0:
+                    if death_screen(score, coins_earned, crystals_earned) == "retry": main(); return
+
+        else:
+            # 보스가 없을 때만 일반 적 스폰
+            spawn_timer += 1
+            if spawn_timer >= cur_spawn_delay:
+                spawn_timer = 0
+                enemies.append({'rect': pygame.Rect(random.randint(0, WIDTH-ENEMY_W), -ENEMY_H, ENEMY_W, ENEMY_H),
+                                'hp': cur_e_hp, 'max_hp': cur_e_hp})
+
+        # 일반 적 이동
         for en in enemies[:]:
             en['rect'].y += cur_speed
             if en['rect'].top > HEIGHT: enemies.remove(en)
@@ -518,29 +615,47 @@ def main():
                 elif it['type'] == 'heal': hp = min(max_hp, hp + heal_amt)
                 elif it['type'] == 'drone':
                     if len(drones) < max_drone_slots:
-                        drones.append({'rect': pygame.Rect(0, 0, DRONE_W, DRONE_H),
-                                       'px': float(player.centerx), 'py': float(player.centery), 'shoot_cd': 30})
+                        drones.append({'rect': pygame.Rect(0, 0, DRONE_W, DRONE_H), 'px': float(player.centerx), 'py': float(player.centery), 'shoot_cd': 30})
                 items.remove(it)
             elif it['rect'].top > HEIGHT: items.remove(it)
 
-        # 충돌 검사 (총알-적)
+        # 내 총알 -> 적/보스 충돌
         drop_chance = min(0.85, base_drop_chance + item_drop_bonus)
         for b in bullets[:]:
-            for en in enemies[:]:
-                if b['rect'].colliderect(en['rect']):
-                    if b in bullets: bullets.remove(b)
-                    en['hp'] -= b['dmg']
-                    if en['hp'] <= 0:
-                        if random.random() < drop_chance:
-                            itype = random.choice(['dmg', 'spd', 'move', 'heal', 'drone'])
-                            icolor = {'dmg': RED, 'spd': YELLOW, 'move': BLUE, 'heal': GREEN, 'drone': PURPLE}[itype]
-                            items.append({'rect': pygame.Rect(en['rect'].centerx, en['rect'].centery, ITEM_SIZE, ITEM_SIZE),
-                                          'type': itype, 'color': icolor})
-                        if en in enemies: enemies.remove(en)
-                        pts = 10 + score_bonus
-                        score += pts
-                        coins_earned += 1   # 적 처치 시 1코인
-                    break
+            hit_something = False
+            
+            # 1. 보스 타격
+            if boss and b['rect'].colliderect(boss.rect):
+                boss.hp -= (b['dmg'] + boss_dmg_bonus) # 보스 데미지 업그레이드 적용
+                hit_something = True
+                if boss.hp <= 0:
+                    score += 500
+                    crystals_earned += 1
+                    hp = min(max_hp, hp + boss_heal_amt) # 보스 처치 회복
+                    boss = None
+                    boss_level += 1
+                    next_boss_score += (500 + boss_level * 500)
+                    boss_bullets.clear()
+                    
+            # 2. 일반 적 타격
+            if not hit_something:
+                for en in enemies[:]:
+                    if b['rect'].colliderect(en['rect']):
+                        en['hp'] -= b['dmg']
+                        hit_something = True
+                        if en['hp'] <= 0:
+                            if random.random() < drop_chance:
+                                itype = random.choice(['dmg', 'spd', 'move', 'heal', 'drone'])
+                                icolor = {'dmg': RED, 'spd': YELLOW, 'move': BLUE, 'heal': GREEN, 'drone': PURPLE}[itype]
+                                items.append({'rect': pygame.Rect(en['rect'].centerx, en['rect'].centery, ITEM_SIZE, ITEM_SIZE),
+                                              'type': itype, 'color': icolor})
+                            if en in enemies: enemies.remove(en)
+                            score += 10 + score_bonus
+                            coins_earned += 1
+                        break
+                        
+            if hit_something and b in bullets:
+                bullets.remove(b)
 
         # 플레이어-적 충돌
         if invincible > 0: invincible -= 1
@@ -551,12 +666,9 @@ def main():
                     invincible = 60
                     enemies.remove(en)
                     if hp <= 0:
-                        # ── 사망 처리 ──
-                        result = death_screen(score, coins_earned)
-                        if result == "retry": main()
-                        return
+                        if death_screen(score, coins_earned, crystals_earned) == "retry": main(); return
 
-        # --- 그리기 ---
+        # --- 화면 그리기 ---
         screen.fill(GRAY)
         for s in stars:
             s[1] += 1
@@ -566,16 +678,26 @@ def main():
         for b in bullets:
             if BULLET_IMAGE: screen.blit(BULLET_IMAGE, b['rect'].topleft)
             else: pygame.draw.rect(screen, YELLOW, b['rect'])
+            
         for en in enemies: draw_enemy(screen, en)
         for dn in drones:  draw_drone(screen, dn['rect'])
+        
+        # 보스 및 보스 탄막 그리기
+        if boss: boss.draw(screen)
+        for bb in boss_bullets:
+            if bb['type'] == 'blast': pygame.draw.rect(screen, RED, bb['rect'])
+            elif bb['type'] == 'aim': pygame.draw.circle(screen, ORANGE, bb['rect'].center, 6)
+            else: pygame.draw.circle(screen, YELLOW, bb['rect'].center, 5)
+
         for it in items:
             pygame.draw.circle(screen, it['color'], it['rect'].center, ITEM_SIZE // 2)
             label = 'D' if it['type'] == 'drone' else it['type'][0].upper()
             screen.blit(font_small.render(label, True, BLACK), (it['rect'].x + 6, it['rect'].y + 2))
 
         if (invincible // 5) % 2 == 0: draw_player(screen, player)
-        draw_hud(score, hp, max_hp, len(drones), drone_spread, coins_earned)
+        
+        draw_hud(score, hp, max_hp, len(drones), drone_spread, coins_earned, crystals_earned)
         pygame.display.flip()
 
 if __name__ == "__main__":
-    main()  
+    main()
