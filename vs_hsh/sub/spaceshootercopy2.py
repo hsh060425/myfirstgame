@@ -1,12 +1,28 @@
 import pygame
 import random
 import sys
+import os  # 추가됨
 import math
 import base64
 import io
 
+# ─────────────────────────────────────────────
+# 🛠️ 이미지에서 제공된 resource_path() 함수 정의
+# ─────────────────────────────────────────────
+def resource_path(relative_path):
+    """개발 중과 빌드 후 모두 동작하는 경로 반환"""
+    try:
+        # PyInstaller에 의해 임시 폴더(_MEIPASS)가 생성된 경우
+        base_path = sys._MEIPASS
+    except Exception:
+        # 일반 파이썬 실행 환경인 경우
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+# ─────────────────────────────────────────────
+
 pygame.init()
 pygame.mixer.init()
+
 
 # --- 설정 및 상수 ---
 WIDTH, HEIGHT = 800, 600
@@ -75,23 +91,27 @@ for i in range(4):
 
 def load_image(file_name, width, height):
     try:
-        img = pygame.image.load(file_name).convert_alpha()
+        # 이미지의 '수정 후' 예시 적용
+        img = pygame.image.load(resource_path(file_name)).convert_alpha()
         return pygame.transform.scale(img, (width, height))
     except: return None
 
 def load_sound(file_name):
-    try: return pygame.mixer.Sound(file_name)
+    try: 
+        # 사운드의 '수정 후' 예시 적용
+        return pygame.mixer.Sound(resource_path(file_name))
     except: return None
+
 
 # ─────────────────────────────────────────────
 # 🎵 에셋 파일 경로 설정 (BGM 및 스프라이트) 🎨
 # ─────────────────────────────────────────────
 # 사용할 이미지와 음악 파일의 경로를 여기에 입력하세요.
-BULLET_IMAGE = load_image("./assets/images/lazer.png", BULLET_W, BULLET_H)
-BOSS_IMAGE   = load_image("./assets/images/boss.png", BOSS_W, BOSS_H) 
-ENEMY_IMAGE  = load_image("./assets/images/enemy.png", ENEMY_W, ENEMY_H) # 적 이미지
+BULLET_IMAGE = load_image("assets/images/lazer.png", BULLET_W, BULLET_H)
+BOSS_IMAGE   = load_image("assets/images/boss.png", BOSS_W, BOSS_H) 
+ENEMY_IMAGE  = load_image("assets/images/enemy.png", ENEMY_W, ENEMY_H)
 
-SHOOT_SOUND  = load_sound("./assets/sounds/lazer.wav")
+SHOOT_SOUND  = load_sound("assets/sounds/lazer.wav")
 if SHOOT_SOUND: SHOOT_SOUND.set_volume(0.2)
 
 # 배경음악 (BGM) 설정
