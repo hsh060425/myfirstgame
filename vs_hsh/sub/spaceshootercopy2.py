@@ -721,7 +721,7 @@ def main():
                 boss.hp -= (b['dmg'] + boss_dmg_bonus)
                 hit_something = True
                 if boss.hp <= 0:
-                    score += 500
+                    score +=100
                     crystals_earned += 1
                     hp = min(max_hp, hp + boss_heal_amt)
                     boss = None
