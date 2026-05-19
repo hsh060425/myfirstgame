@@ -7,7 +7,7 @@ import sys
 pygame.init()
 WIDTH, HEIGHT = 800, 750  # 타이핑 UI를 위해 세로 길이 확장
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Typing Isaac System - UI Enhanced")
+pygame.display.set_caption("Typing Isaac System - Final Rev")
 clock = pygame.time.Clock()
 
 # 색상 정의
@@ -18,7 +18,7 @@ WALL_COLOR = (35, 30, 25)
 DOOR_OPEN = (200, 160, 40)
 DOOR_LOCKED = (100, 100, 100)
 PLAYER_COLOR = (100, 180, 255)
-PLAYER_IMMUNE = (180, 220, 255) # 무적 상태일 때 플레이어 색상
+PLAYER_IMMUNE = (180, 220, 255) # 무적 상태 고정 색상
 ENEMY_COLOR = (220, 60, 60)
 BOSS_COLOR = (180, 40, 200)
 UI_BG = (25, 25, 35)
@@ -66,7 +66,7 @@ player_radius = 15
 player_words = ["attack"]
 player_max_hp = 100
 player_hp = 100
-player_immune_timer = 0 # 무적 시간 타이머
+player_immune_timer = 0 # 무적 시간 타이머 (60프레임 = 1초)
 
 # 타이핑 및 전투 UI 변수
 input_text = ""
@@ -114,7 +114,7 @@ while running:
     room = world_map[current_coords]
     room_cleared = (len(room["enemies"]) == 0)
     
-    # 무적 타이머 감소
+    # 무적 타이머 감소 로직
     if player_immune_timer > 0:
         player_immune_timer -= 1
     
@@ -245,7 +245,7 @@ while running:
                 other_e["pos"][0] -= push_x
                 other_e["pos"][1] -= push_y
 
-        # [3] 플레이어와 적 충돌 (피격 시스템 추가)
+        # [3] 플레이어와 적 충돌 (피격 시스템 및 무적 판정 완벽 적용)
         p_dx = player_pos[0] - e["pos"][0]
         p_dy = player_pos[1] - e["pos"][1]
         p_dist = math.hypot(p_dx, p_dy)
@@ -253,17 +253,20 @@ while running:
         
         if p_dist < min_dist and p_dist > 0:
             overlap = min_dist - p_dist 
+            # 플레이어를 부딪힌 반대 방향으로 밀어냄
             player_pos[0] += (p_dx / p_dist) * overlap
             player_pos[1] += (p_dy / p_dist) * overlap
             
+            # 밀려난 플레이어가 방 밖으로 나가지 않도록 경계선 보정
             player_pos[0] = max(ROOM_RECT.left + player_radius, min(player_pos[0], ROOM_RECT.right - player_radius))
             player_pos[1] = max(ROOM_RECT.top + player_radius, min(player_pos[1], ROOM_RECT.bottom - player_radius))
             
-            # 💡 플레이어 피격 처리 (무적 시간이 아닐 때만 차감)
-            if player_immune_timer == 0 and player_hp > 0:
+            # 무적 시간이 0 이하일 때만 데미지를 입도록 수정 (중복 데미지 방지)
+            if player_immune_timer <= 0 and player_hp > 0:
                 damage = 25 if e["type"] == "boss" else 10
                 player_hp = max(0, player_hp - damage)
-                player_immune_timer = 30 # 0.5초 무적 설정 (60fps 기준 30프레임)
+                # 60프레임(약 1초) 동안 무적 시간 부여
+                player_immune_timer = 60 
 
     # 방 클리어 시 보상 생성
     if not room["cleared"] and len(room["enemies"]) == 0 and current_coords != (0,0):
@@ -303,16 +306,16 @@ while running:
             elif (dx, dy) == (1, 0):
                 pygame.draw.rect(screen, door_color, (ROOM_RECT.right - 5, ROOM_RECT.centery - door_w//2, door_thick + 5, door_w))
 
-    # 적 및 💡머리 위 HP 바 그리기
+    # 적 및 💡머리 위 HP 바 그리기 (크기 키움 적용)
     for e in room["enemies"]:
         color = BOSS_COLOR if e["type"] == "boss" else ENEMY_COLOR
         pygame.draw.circle(screen, color, (int(e["pos"][0]), int(e["pos"][1])), e["radius"])
         
-        # 머리 위 HP 바 구현
-        bar_w = e["radius"] * 2
-        bar_h = 5
-        bar_x = e["pos"][0] - e["radius"]
-        bar_y = e["pos"][1] - e["radius"] - 10
+        # 수정된 체력바 구현 (가로 1.5배 넓게, 세로도 약간 두껍게)
+        bar_w = e["radius"] * 3
+        bar_h = 8
+        bar_x = e["pos"][0] - (bar_w / 2) # 체력바가 적 머리 중앙에 오도록 정렬
+        bar_y = e["pos"][1] - e["radius"] - 15
         
         # 배경 (빨간색 바)
         pygame.draw.rect(screen, HP_RED, (bar_x, bar_y, bar_w, bar_h))
@@ -325,10 +328,15 @@ while running:
         rw_text = font.render(f"[{room['reward']['word']}]", True, (255, 255, 0))
         screen.blit(rw_text, (room["reward"]["pos"][0] - rw_text.get_width()//2, room["reward"]["pos"][1] - 15))
 
-    # 플레이어 그리기 (무적 프레임일 때는 반짝이도록 색 변경)
-    p_color = PLAYER_IMMUNE if player_immune_timer % 4 > 2 else PLAYER_COLOR
+    # 플레이어 그리기 (무적 프레임 시각 효과 수정)
     if player_hp > 0:
-        pygame.draw.circle(screen, p_color, (int(player_pos[0]), int(player_pos[1])), player_radius)
+        if player_immune_timer > 0:
+            # 💡 무적 상태일 때는 연한 하늘색으로 고정하고 흰색 테두리 추가
+            pygame.draw.circle(screen, PLAYER_IMMUNE, (int(player_pos[0]), int(player_pos[1])), player_radius)
+            pygame.draw.circle(screen, WHITE, (int(player_pos[0]), int(player_pos[1])), player_radius + 2, 2)
+        else:
+            # 정상 상태일 때는 파란색
+            pygame.draw.circle(screen, PLAYER_COLOR, (int(player_pos[0]), int(player_pos[1])), player_radius)
 
     # 부채꼴 공격 이펙트
     if attack_timer > 0 and 'attack_data' in locals():
@@ -357,17 +365,18 @@ while running:
             pygame.draw.rect(screen, color, (draw_x, draw_y, CELL, CELL))
             pygame.draw.rect(screen, WHITE, (draw_x, draw_y, CELL, CELL), 1)
 
-    # 9. 💡 상단 UI 그리기 (자신의 HP 및 메시지 배치 수정)
-    # [좌측 상단 플레이어 HP UI]
-    pygame.draw.rect(screen, UI_BG, (15, 15, 180, 35))
-    pygame.draw.rect(screen, WHITE, (15, 15, 180, 35), 2)
-    hp_text = font.render(f"PLAYER HP: {player_hp}/{player_max_hp}", True, WHITE if player_hp > 25 else HP_RED)
-    screen.blit(hp_text, (25, 22))
+    # 9. 상단 UI 그리기
+    # 💡 [좌측 상단 플레이어 HP UI 크기 상향]
+    pygame.draw.rect(screen, UI_BG, (15, 15, 260, 35)) # 가로 250, 세로 35으로 키움
+    pygame.draw.rect(screen, WHITE, (15, 15, 260, 35), 2)
+    # 더 큰 폰트 사용
+    hp_font = pygame.font.SysFont(None, 35) # 새로운 폰트 크기 정의
+    hp_text = hp_font.render(f"PLAYER HP: {player_hp}/{player_max_hp}", True, WHITE if player_hp > 25 else HP_RED)
+    screen.blit(hp_text, (30, 25)) # 텍스트 위치 조정
 
-    # [💡 우측 상단 메시지 알림 UI (위치 이동)]
+    # [우측 상단 메시지 알림 UI]
     if message_timer > 0:
         msg_surf = font.render(message, True, (255, 230, 100))
-        # 우측 상단 미니맵 왼쪽에 위치하도록 배치 조절
         screen.blit(msg_surf, (WIDTH - msg_surf.get_width() - 20, 20))
         message_timer -= 1
 
