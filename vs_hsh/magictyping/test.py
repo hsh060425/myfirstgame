@@ -7,7 +7,7 @@ import sys
 pygame.init()
 WIDTH, HEIGHT = 800, 750
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Typing Isaac - Fixed Fields & All Combos (+Cheat)")
+pygame.display.set_caption("Typing Isaac - Items & Combos (+Cheat)")
 clock = pygame.time.Clock()
 
 # 색상 정의
@@ -32,18 +32,27 @@ FIELD_COLORS = {
     "explosion": (255, 50, 50, 180),
     "heal": (50, 255, 150, 120),
     "guard": (255, 215, 0, 120),
-    # 콤보 특수 색상
     "plague_storm": (120, 30, 160, 160), 
     "toxic_cloud": (70, 220, 40, 140),   
     "wildfire": (255, 130, 0, 180),      
     "sanctuary": (200, 255, 150, 150),
-    "glacial_barricade": (150, 220, 255, 180), # 빙하 방벽
-    "counter_shield": (255, 200, 50, 180),     # 반응형 장갑
-    "divine_grace": (255, 255, 200, 150)       # 신의 은총
+    "glacial_barricade": (150, 220, 255, 180), 
+    "counter_shield": (255, 200, 50, 180),     
+    "divine_grace": (255, 255, 200, 150)       
 }
 
-font = pygame.font.SysFont(None, 30)
-big_font = pygame.font.SysFont(None, 40)
+# 한글 폰트 설정 (UI 글자가 너무 크지 않도록 사이즈를 대폭 축소했습니다)
+pygame.font.init()
+system_fonts = pygame.font.get_fonts()
+kor_font = None
+for f in ['malgungothic', 'applegothic', 'applesdgothicneo', 'nanumgothic', 'd2coding']:
+    if f in system_fonts:
+        kor_font = f
+        break
+
+# 원본(30, 40)에서 비율에 맞게 축소 (20, 30)
+font = pygame.font.SysFont(kor_font, 20)
+big_font = pygame.font.SysFont(kor_font, 30)
 
 def generate_map(num_rooms=10):
     rooms = {}
@@ -76,10 +85,42 @@ player_max_hp = 100
 player_hp = 100
 player_immune_timer = 0
 
+player_stats = {
+    "skill_duration_mult": 1.0,
+    "radius_mult": 1.0,
+    "damage_mult": 1.0,
+    "speed_mult": 1.0,
+    "thorns_damage": 0,
+    "defense_up": 0.0
+}
+player_items = {
+    "pet": False,
+    "elemental_blade": False,
+    "map_reveal": False
+}
+pet_pos = [WIDTH // 2, ROOM_RECT.centery]
+pet_attack_timer = 0
+
+STACKABLE_ITEMS = [
+    {"id": "duration_up", "name": "모래시계"},
+    {"id": "radius_up", "name": "확대경"},
+    {"id": "damage_up", "name": "전사의 검"},
+    {"id": "speed_up", "name": "바람의 부츠"},
+    {"id": "thorns", "name": "가시 갑옷"},
+    {"id": "hp_up", "name": "생명의 심장"},
+    {"id": "defense_up", "name": "강철 방패"}
+]
+
+NON_STACKABLE_ITEMS = [
+    {"id": "pet", "name": "미니 슬라임"},
+    {"id": "elemental_blade", "name": "속성 부여검"},
+    {"id": "map_reveal", "name": "마법 지도"}
+]
+
 input_text = ""
 attack_timer = 0
 attack_data = {"angle": 0, "radius": 0, "half_cone": 0}
-message = "'cheat' 타이핑: 모든 콤보 테스트!"
+message = "플레이 해보세요"
 message_timer = 180
 
 active_fields = []
@@ -103,10 +144,13 @@ def cast_spell(element, shape, p_pos, facing, target_e):
     elif shape == "ball": duration, radius = min(duration, 120), 40
     elif shape == "square": duration, radius = 300, 60
 
+    if duration > 60: 
+        duration = int(duration * player_stats["skill_duration_mult"])
+    radius = int(radius * player_stats["radius_mult"])
+
     vx, vy = 0, 0
     
     if shape == "field": 
-        # 💡 장판은 플레이어의 현재 위치(바닥)에 한 번 생성되고 고정됩니다!
         spawn_pos = list(p_pos)
     elif shape == "ball":
         spawn_pos = list(p_pos)
@@ -151,6 +195,7 @@ def enter_room(coords):
 enter_room((0,0))
 
 def is_discovered(coords):
+    if player_items.get("map_reveal", False): return True
     if world_map[coords]["visited"]: return True
     for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
         neighbor = (coords[0] + dx, coords[1] + dy)
@@ -174,10 +219,43 @@ while running:
                 cmd = input_text.strip().lower()
                 input_text = ""
                 
+                # 치트키 시스템
                 if cmd == "cheat":
                     player_words = ["attack", "fire", "poison", "ice", "bomb", "tree", "guard", "heal"]
                     player_shapes = ["ball", "square", "spike"]
-                    message = "😎 치트 활성화: 완벽해진 콤보를 확인하세요!"
+                    player_items["pet"] = True
+                    player_items["elemental_blade"] = True
+                    player_items["map_reveal"] = True
+                    player_stats["speed_mult"] = 1.5
+                    player_stats["damage_mult"] = 3.0
+                    player_stats["skill_duration_mult"] = 2.0
+                    player_stats["radius_mult"] = 1.5
+                    player_stats["defense_up"] = 0.5
+                    player_stats["thorns_damage"] = 20
+                    player_max_hp = 200
+                    player_hp = 200
+                    message = " 치트 활성화: 단어, 형태, 아이템 모두 획득!"
+                    message_timer = 180
+                    continue
+                elif cmd == "cheat word":
+                    player_words = ["attack", "fire", "poison", "ice", "bomb", "tree", "guard", "heal"]
+                    player_shapes = ["ball", "square", "spike"]
+                    message = " 치트1 활성화: 모든 마법 단어와 형태 획득!"
+                    message_timer = 180
+                    continue
+                elif cmd == "cheat item":
+                    player_items["pet"] = True
+                    player_items["elemental_blade"] = True
+                    player_items["map_reveal"] = True
+                    player_stats["speed_mult"] = 1.5
+                    player_stats["damage_mult"] = 3.0
+                    player_stats["skill_duration_mult"] = 2.0
+                    player_stats["radius_mult"] = 1.5
+                    player_stats["defense_up"] = 0.5
+                    player_stats["thorns_damage"] = 20
+                    player_max_hp = 200
+                    player_hp = 200
+                    message = " 치트2 활성화: 모든 아이템 및 스탯 상승!"
                     message_timer = 180
                     continue
 
@@ -187,7 +265,7 @@ while running:
                     shape = tokens[1] if len(tokens) > 1 else "field"
                     
                     if element == "attack" and shape == "field":
-                        attack_radius = 140
+                        attack_radius = 140 * player_stats["radius_mult"]
                         cone_angle = math.radians(60)
                         half_cone = cone_angle / 2
                         base_angle = 0 
@@ -203,7 +281,15 @@ while running:
                                 if dist <= attack_radius:
                                     target_angle = math.atan2(edy, edx)
                                     angle_diff = (target_angle - base_angle + math.pi) % (2 * math.pi) - math.pi
-                                    if abs(angle_diff) <= half_cone: e["hp"] -= 15
+                                    if abs(angle_diff) <= half_cone: 
+                                        e["hp"] -= 15 * player_stats["damage_mult"]
+                                        if player_items["elemental_blade"]:
+                                            rand_elem = random.choice(["fire", "ice", "poison", "bomb", "tree"])
+                                            if rand_elem == "fire": e["hp"] -= 5 * player_stats["damage_mult"]
+                                            elif rand_elem == "ice": e["speed"] *= 0.3
+                                            elif rand_elem == "poison": e["hp"] -= 3 * player_stats["damage_mult"]
+                                            elif rand_elem == "bomb": e["hp"] -= 10 * player_stats["damage_mult"]
+                                            elif rand_elem == "tree": e["stun_timer"] = max(e.get("stun_timer",0), 30)
                                         
                         attack_timer = 15
                         attack_data = {"angle": base_angle, "radius": attack_radius, "half_cone": half_cone}
@@ -217,15 +303,18 @@ while running:
 
             elif event.key == pygame.K_BACKSPACE: input_text = input_text[:-1]
             elif event.key == pygame.K_SPACE: input_text += " "
-            elif event.unicode.isalpha(): input_text += event.unicode
+            elif event.unicode != "":
+                if event.unicode.isalpha() or ('가' <= event.unicode <= '힣'):
+                    input_text += event.unicode
 
     if player_hp > 0:
+        ps = player_speed * player_stats["speed_mult"]
         keys = pygame.key.get_pressed()
         new_x, new_y = player_pos[0], player_pos[1]
-        if keys[pygame.K_LEFT]:  new_x -= player_speed; player_facing = [-1, 0]
-        if keys[pygame.K_RIGHT]: new_x += player_speed; player_facing = [1, 0]
-        if keys[pygame.K_UP]:    new_y -= player_speed; player_facing = [0, -1]
-        if keys[pygame.K_DOWN]:  new_y += player_speed; player_facing = [0, 1]
+        if keys[pygame.K_LEFT]:  new_x -= ps; player_facing = [-1, 0]
+        if keys[pygame.K_RIGHT]: new_x += ps; player_facing = [1, 0]
+        if keys[pygame.K_UP]:    new_y -= ps; player_facing = [0, -1]
+        if keys[pygame.K_DOWN]:  new_y += ps; player_facing = [0, 1]
     else:
         new_x, new_y = player_pos[0], player_pos[1]
 
@@ -255,15 +344,33 @@ while running:
     for e in room["enemies"]:
         e["speed"] = e["base_speed"]
         
-    # 투사체 이동 (장판은 바닥에 고정되므로 이동 코드가 삭제되었습니다)
     for f in active_fields:
         if f["shape"] == "ball":
             f["pos"][0] += f["vx"]
             f["pos"][1] += f["vy"]
 
-    # 💡 모든 단어가 콤보를 갖도록 수정된 시스템
+    if player_items["pet"] and player_hp > 0:
+        pet_pos[0] += (player_pos[0] - 35 - pet_pos[0]) * 0.05
+        pet_pos[1] += (player_pos[1] - 35 - pet_pos[1]) * 0.05
+        
+        pet_attack_timer -= 1
+        if pet_attack_timer <= 0 and room["enemies"]:
+            closest_e = min(room["enemies"], key=lambda e: math.hypot(e["pos"][0]-pet_pos[0], e["pos"][1]-pet_pos[1]))
+            dx, dy = closest_e["pos"][0] - pet_pos[0], closest_e["pos"][1] - pet_pos[1]
+            dist = math.hypot(dx, dy)
+            if dist > 0:
+                vx, vy = (dx/dist)*10, (dy/dist)*10
+                spawn_field("attack", list(pet_pos), int(25 * player_stats["radius_mult"]), 30, "ball", vx, vy)
+            pet_attack_timer = 90 
+
     combo_removes = []
     combo_adds = []
+    
+    def create_combo(ctype, base_rad, base_dur, cx, cy):
+        rad = int(base_rad * player_stats["radius_mult"])
+        dur = base_dur if base_dur <= 60 else int(base_dur * player_stats["skill_duration_mult"])
+        return {"pos": [cx, cy], "type": ctype, "radius": rad, "timer": dur, "max_timer": dur, "shape": "field", "vx": 0, "vy": 0}
+
     for i in range(len(active_fields)):
         for j in range(i + 1, len(active_fields)):
             f1, f2 = active_fields[i], active_fields[j]
@@ -275,27 +382,24 @@ while running:
                 mid_x = (f1["pos"][0] + f2["pos"][0]) / 2
                 mid_y = (f1["pos"][1] + f2["pos"][1]) / 2
                 
-                # 원소별 조합표
                 if combo == {"fire", "poison"}: 
-                    combo_removes.extend([f1, f2]); combo_adds.append({"pos": [mid_x, mid_y], "type": "explosion", "radius": 150, "timer": 20, "max_timer": 20, "shape": "field", "vx": 0, "vy": 0})
+                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("explosion", 150, 20, mid_x, mid_y))
                 elif combo == {"fire", "ice"}: 
-                    combo_removes.extend([f1, f2]); combo_adds.append({"pos": [mid_x, mid_y], "type": "steam", "radius": 130, "timer": 240, "max_timer": 240, "shape": "field", "vx": 0, "vy": 0})
+                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("steam", 130, 240, mid_x, mid_y))
                 elif combo == {"ice", "poison"}: 
-                    combo_removes.extend([f1, f2]); combo_adds.append({"pos": [mid_x, mid_y], "type": "plague_storm", "radius": 140, "timer": 300, "max_timer": 300, "shape": "field", "vx": 0, "vy": 0})
+                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("plague_storm", 140, 300, mid_x, mid_y))
                 elif combo == {"bomb", "poison"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append({"pos": [mid_x, mid_y], "type": "toxic_cloud", "radius": 180, "timer": 400, "max_timer": 400, "shape": "field", "vx": 0, "vy": 0})
+                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("toxic_cloud", 180, 400, mid_x, mid_y))
                 elif combo == {"heal", "tree"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append({"pos": [mid_x, mid_y], "type": "sanctuary", "radius": 160, "timer": 300, "max_timer": 300, "shape": "field", "vx": 0, "vy": 0})
+                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("sanctuary", 160, 300, mid_x, mid_y))
                 elif combo == {"fire", "tree"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append({"pos": [mid_x, mid_y], "type": "wildfire", "radius": 150, "timer": 120, "max_timer": 120, "shape": "field", "vx": 0, "vy": 0})
-                
-                # 💡 방어(guard)와 연계된 신규 콤보들
+                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("wildfire", 150, 120, mid_x, mid_y))
                 elif combo == {"guard", "ice"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append({"pos": [mid_x, mid_y], "type": "glacial_barricade", "radius": 140, "timer": 300, "max_timer": 300, "shape": "field", "vx": 0, "vy": 0})
+                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("glacial_barricade", 140, 300, mid_x, mid_y))
                 elif combo == {"guard", "bomb"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append({"pos": [mid_x, mid_y], "type": "counter_shield", "radius": 130, "timer": 150, "max_timer": 150, "shape": "field", "vx": 0, "vy": 0})
+                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("counter_shield", 130, 150, mid_x, mid_y))
                 elif combo == {"guard", "heal"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append({"pos": [mid_x, mid_y], "type": "divine_grace", "radius": 160, "timer": 240, "max_timer": 240, "shape": "field", "vx": 0, "vy": 0})
+                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("divine_grace", 160, 240, mid_x, mid_y))
 
     for f in combo_removes:
         if f in active_fields: active_fields.remove(f)
@@ -312,7 +416,6 @@ while running:
         if f["shape"] in ["field", "ball", "spike"] and p_dist <= f["radius"] + player_radius: is_p_hit = True
         elif f["shape"] == "square" and (abs(player_pos[0]-f["pos"][0]) <= f["radius"]+player_radius) and (abs(player_pos[1]-f["pos"][1]) <= f["radius"]+player_radius): is_p_hit = True
         
-        # 플레이어가 장판 위에 있을 때 버프 효과
         if is_p_hit:
             if f["type"] == "heal": player_hp = min(player_max_hp, player_hp + 0.2)
             elif f["type"] == "guard": player_immune_timer = max(player_immune_timer, 10)
@@ -321,6 +424,7 @@ while running:
                 player_immune_timer = max(player_immune_timer, 10)
                 player_hp = min(player_max_hp, player_hp + 0.3)
 
+        dm = player_stats["damage_mult"]
         for e in room["enemies"]:
             is_hit = False
             dx, dy = e["pos"][0] - f["pos"][0], e["pos"][1] - f["pos"][1]
@@ -330,7 +434,6 @@ while running:
             elif f["shape"] == "square": is_hit = (abs(dx) <= f["radius"] + e["radius"]) and (abs(dy) <= f["radius"] + e["radius"])
 
             if is_hit:
-                # 형태(Shape) 물리 효과
                 if f["shape"] == "field": e["speed"] *= 0.5 
                 elif f["shape"] == "spike": e["stun_timer"] = 30
                 elif f["shape"] == "square":
@@ -338,29 +441,34 @@ while running:
                         e["pos"][0] += (dx/dist) * 8
                         e["pos"][1] += (dy/dist) * 8
                 
-                # 특수 콤보 물리 효과 (성역, 빙하 방벽, 반응형 장갑)
                 if f["type"] in ["sanctuary", "glacial_barricade", "counter_shield"]:
                     if dist > 0:
                         knockback = 12 if f["type"] == "counter_shield" else 5
                         e["pos"][0] += (dx/dist) * knockback
                         e["pos"][1] += (dy/dist) * knockback
                 
-                # 속성/콤보 데미지 및 디버프
-                if f["type"] == "attack": e["hp"] -= 1.5 
-                elif f["type"] == "bomb": e["hp"] -= 8   
-                elif f["type"] == "explosion": e["hp"] -= 8
-                elif f["type"] == "fire": e["hp"] -= 0.6
-                elif f["type"] == "poison": e["hp"] -= 0.2
-                elif f["type"] == "steam": e["hp"] -= 1.0
+                if f["type"] == "attack": 
+                    e["hp"] -= 1.5 * dm
+                    if player_items["elemental_blade"] and random.random() < 0.1:
+                        rand_elem = random.choice(["fire", "ice", "poison", "tree"])
+                        if rand_elem == "fire": e["hp"] -= 1.0 * dm
+                        elif rand_elem == "ice": e["speed"] *= 0.3
+                        elif rand_elem == "poison": e["hp"] -= 0.5 * dm
+                        elif rand_elem == "tree": e["stun_timer"] = max(e.get("stun_timer",0), 30)
+
+                elif f["type"] == "bomb": e["hp"] -= 8 * dm
+                elif f["type"] == "explosion": e["hp"] -= 8 * dm
+                elif f["type"] == "fire": e["hp"] -= 0.6 * dm
+                elif f["type"] == "poison": e["hp"] -= 0.2 * dm
+                elif f["type"] == "steam": e["hp"] -= 1.0 * dm
                 elif f["type"] == "ice": e["speed"] *= 0.3
                 elif f["type"] == "tree": e["speed"] = 0
                 
-                # 신규 콤보 틱 효과
-                elif f["type"] == "plague_storm": e["hp"] -= 0.5; e["speed"] *= 0.1 
-                elif f["type"] == "toxic_cloud": e["hp"] -= 1.0                     
-                elif f["type"] == "wildfire": e["hp"] -= 2.0
+                elif f["type"] == "plague_storm": e["hp"] -= 0.5 * dm; e["speed"] *= 0.1 
+                elif f["type"] == "toxic_cloud": e["hp"] -= 1.0 * dm                    
+                elif f["type"] == "wildfire": e["hp"] -= 2.0 * dm
                 elif f["type"] == "glacial_barricade": e["speed"] *= 0.1
-                elif f["type"] == "counter_shield": e["hp"] -= 4.0 # 폭발 데미지 주며 밀쳐냄
+                elif f["type"] == "counter_shield": e["hp"] -= 4.0 * dm 
 
     room["enemies"] = [e for e in room["enemies"] if e["hp"] > 0]
 
@@ -408,23 +516,69 @@ while running:
             player_pos[0] += (p_dx / p_dist) * (min_dist - p_dist)
             player_pos[1] += (p_dy / p_dist) * (min_dist - p_dist)
             if player_immune_timer <= 0 and player_hp > 0:
-                player_hp = max(0, player_hp - (25 if e["type"] == "boss" else 10))
+                base_dmg = 25 if e["type"] == "boss" else 10
+                actual_dmg = base_dmg * (1.0 - player_stats["defense_up"])
+                player_hp = max(0, player_hp - actual_dmg)
                 player_immune_timer = 60 
+                
+                if player_stats["thorns_damage"] > 0:
+                    e["hp"] -= player_stats["thorns_damage"]
 
     if not room["cleared"] and len(room["enemies"]) == 0 and current_coords != (0,0):
         room["cleared"] = True
         all_elements = ["fire", "poison", "ice", "bomb", "tree", "guard", "heal"]
         all_shapes = ["ball", "square", "spike"]
-        available_rewards = [w for w in all_elements if w not in player_words] + [s for s in all_shapes if s not in player_shapes]
-        if available_rewards: room["reward"] = {"word": random.choice(available_rewards), "pos": [WIDTH//2, ROOM_RECT.centery]}
+        
+        available_words = [w for w in all_elements if w not in player_words]
+        available_shapes = [s for s in all_shapes if s not in player_shapes]
+        available_non_stack = [item for item in NON_STACKABLE_ITEMS if not player_items.get(item["id"], False)]
+        
+        reward_pool = []
+        if available_words: reward_pool.extend(["word"] * 2) 
+        if available_shapes: reward_pool.extend(["shape"] * 2) 
+        reward_pool.extend(["stackable_item"] * 4) 
+        if available_non_stack: reward_pool.extend(["non_stackable_item"] * 2)
+        
+        if reward_pool:
+            r_type = random.choice(reward_pool)
+            r_val = None
+            if r_type == "word": r_val = random.choice(available_words)
+            elif r_type == "shape": r_val = random.choice(available_shapes)
+            elif r_type == "stackable_item": r_val = random.choice(STACKABLE_ITEMS)
+            elif r_type == "non_stackable_item": r_val = random.choice(available_non_stack)
+            
+            room["reward"] = {"data": {"type": r_type, "value": r_val}, "pos": [WIDTH//2, ROOM_RECT.centery]}
 
     if room.get("reward"):
         dist = math.hypot(room["reward"]["pos"][0] - player_pos[0], room["reward"]["pos"][1] - player_pos[1])
         if dist < 40:
-            new_word = room["reward"]["word"]
-            if new_word in ["ball", "square", "spike"]: player_shapes.append(new_word)
-            else: player_words.append(new_word)
-            message = f"획득: '{new_word}'!"
+            reward_data = room["reward"]["data"]
+            r_type = reward_data["type"]
+            r_val = reward_data["value"]
+            
+            if r_type == "word":
+                player_words.append(r_val)
+                message = f"단어 획득: '{r_val}'!"
+            elif r_type == "shape":
+                player_shapes.append(r_val)
+                message = f"형태 획득: '{r_val}'!"
+            elif r_type in ["stackable_item", "non_stackable_item"]:
+                item_id = r_val["id"]
+                item_name = r_val["name"]
+                
+                if item_id == "duration_up": player_stats["skill_duration_mult"] += 0.3
+                elif item_id == "radius_up": player_stats["radius_mult"] += 0.25
+                elif item_id == "damage_up": player_stats["damage_mult"] += 0.3
+                elif item_id == "speed_up": player_stats["speed_mult"] += 0.15
+                elif item_id == "thorns": player_stats["thorns_damage"] += 10
+                elif item_id == "hp_up": 
+                    player_max_hp += 30; player_hp += 30
+                elif item_id == "defense_up": player_stats["defense_up"] = min(0.7, player_stats["defense_up"] + 0.15)
+                elif item_id in ["pet", "elemental_blade", "map_reveal"]:
+                    player_items[item_id] = True
+                
+                message = f"아이템 획득: {item_name}!"
+                
             message_timer = 150
             room["reward"] = None
 
@@ -464,6 +618,10 @@ while running:
                 pygame.draw.polygon(field_surface, color, points)
         screen.blit(field_surface, (0, 0))
 
+    if player_items["pet"] and player_hp > 0:
+        pygame.draw.circle(screen, (255, 150, 200), (int(pet_pos[0]), int(pet_pos[1])), 10)
+        pygame.draw.circle(screen, WHITE, (int(pet_pos[0]), int(pet_pos[1])), 10, 2)
+
     for e in room["enemies"]:
         color = BOSS_COLOR if e["type"] == "boss" else ENEMY_COLOR
         pygame.draw.circle(screen, color, (int(e["pos"][0]), int(e["pos"][1])), e["radius"])
@@ -476,7 +634,18 @@ while running:
         pygame.draw.rect(screen, HP_GREEN, (bar_x, bar_y, int(bar_w * max(0, e["hp"] / e["max_hp"])), 8))
 
     if room.get("reward"):
-        rw_text = font.render(f"[{room['reward']['word']}]", True, (255, 255, 0))
+        rw_data = room["reward"]["data"]
+        r_type = rw_data["type"]
+        r_val = rw_data["value"]
+        
+        if r_type in ["word", "shape"]:
+            disp_text = f"[{r_val}]"
+            color = (255, 255, 0)
+        else:
+            disp_text = f"[{r_val['name']}]" 
+            color = (0, 255, 255) if r_type == "stackable_item" else (255, 100, 255)
+            
+        rw_text = font.render(disp_text, True, color)
         screen.blit(rw_text, (room["reward"]["pos"][0] - rw_text.get_width()//2, room["reward"]["pos"][1] - 15))
 
     if player_hp > 0:
@@ -507,9 +676,10 @@ while running:
             pygame.draw.rect(screen, color, (draw_x, draw_y, CELL, CELL))
             pygame.draw.rect(screen, WHITE, (draw_x, draw_y, CELL, CELL), 1)
 
+    # 기본 UI 레이아웃
     pygame.draw.rect(screen, UI_BG, (15, 15, 260, 35))
     pygame.draw.rect(screen, WHITE, (15, 15, 260, 35), 2)
-    screen.blit(font.render(f"PLAYER HP: {int(player_hp)}/{player_max_hp}", True, WHITE if player_hp > 25 else HP_RED), (30, 25))
+    screen.blit(font.render(f"PLAYER HP: {int(player_hp)}/{player_max_hp}", True, WHITE if player_hp > 25 else HP_RED), (30, 22))
 
     if message_timer > 0:
         msg_surf = font.render(message, True, (255, 230, 100))
@@ -520,12 +690,12 @@ while running:
     pygame.draw.rect(screen, UI_BG, ui_rect)
     pygame.draw.line(screen, WHITE, (0, HEIGHT - 100), (WIDTH, HEIGHT - 100), 2)
     
-    screen.blit(font.render(f"Words: {', '.join(player_words)}", True, (150, 200, 255)), (20, HEIGHT - 95))
-    screen.blit(font.render(f"Shapes: {', '.join(player_shapes)}", True, (200, 255, 150)), (20, HEIGHT - 75))
+    screen.blit(font.render(f"Words: {', '.join(player_words)}", True, (150, 200, 255)), (20, HEIGHT - 92))
+    screen.blit(font.render(f"Shapes: {', '.join(player_shapes)}", True, (200, 255, 150)), (20, HEIGHT - 72))
     
     pygame.draw.rect(screen, BLACK, (20, HEIGHT - 45, WIDTH - 40, 35))
     pygame.draw.rect(screen, WHITE, (20, HEIGHT - 45, WIDTH - 40, 35), 2)
-    screen.blit(big_font.render(input_text + "_", True, WHITE), (30, HEIGHT - 40))
+    screen.blit(big_font.render(input_text + "_", True, WHITE), (30, HEIGHT - 42))
 
     pygame.display.flip()
     clock.tick(60)
