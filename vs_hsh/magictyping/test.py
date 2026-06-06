@@ -2,15 +2,14 @@ import pygame
 import random
 import math
 import sys
+import os
 
-# 1. 초기화 및 기본 설정
 pygame.init()
 WIDTH, HEIGHT = 800, 750
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Typing Isaac - Items & Combos (+Cheat)")
 clock = pygame.time.Clock()
 
-# 색상 정의
 WHITE, BLACK = (255, 255, 255), (15, 15, 15)
 FLOOR_COLOR, WALL_COLOR = (50, 45, 40), (35, 30, 25)
 DOOR_OPEN, DOOR_LOCKED = (200, 160, 40), (100, 100, 100)
@@ -20,28 +19,18 @@ UI_BG = (25, 25, 35)
 HP_RED, HP_GREEN = (200, 50, 50), (50, 200, 50)
 MM_CURRENT, MM_VISITED, MM_DISCOVERED, MM_BOSS = (255, 230, 0), (120, 120, 120), (60, 60, 60), (230, 50, 50)
 
-# 속성 및 콤보 색상
 FIELD_COLORS = {
-    "attack": (255, 255, 255, 150),
-    "fire": (255, 80, 0, 120),
-    "poison": (100, 255, 50, 100),
-    "ice": (100, 200, 255, 120),
-    "steam": (200, 200, 220, 150),
-    "tree": (34, 139, 34, 130),
-    "bomb": (255, 100, 0, 180),
-    "explosion": (255, 50, 50, 180),
-    "heal": (50, 255, 150, 120),
-    "guard": (255, 215, 0, 120),
-    "plague_storm": (120, 30, 160, 160), 
-    "toxic_cloud": (70, 220, 40, 140),   
-    "wildfire": (255, 130, 0, 180),      
-    "sanctuary": (200, 255, 150, 150),
-    "glacial_barricade": (150, 220, 255, 180), 
-    "counter_shield": (255, 200, 50, 180),     
-    "divine_grace": (255, 255, 200, 150)       
+    "attack": (255, 255, 255, 150), "fire": (255, 80, 0, 120),
+    "poison": (100, 255, 50, 100), "ice": (100, 200, 255, 120),
+    "steam": (200, 200, 220, 150), "tree": (34, 139, 34, 130),
+    "bomb": (255, 100, 0, 180), "explosion": (255, 50, 50, 180),
+    "heal": (50, 255, 150, 120), "guard": (255, 215, 0, 120),
+    "plague_storm": (120, 30, 160, 160), "toxic_cloud": (70, 220, 40, 140),
+    "wildfire": (255, 130, 0, 180), "sanctuary": (200, 255, 150, 150),
+    "glacial_barricade": (150, 220, 255, 180), "counter_shield": (255, 200, 50, 180),
+    "divine_grace": (255, 255, 200, 150)
 }
 
-# 한글 폰트 설정 (UI 글자가 너무 크지 않도록 사이즈를 대폭 축소했습니다)
 pygame.font.init()
 system_fonts = pygame.font.get_fonts()
 kor_font = None
@@ -49,126 +38,413 @@ for f in ['malgungothic', 'applegothic', 'applesdgothicneo', 'nanumgothic', 'd2c
     if f in system_fonts:
         kor_font = f
         break
-
-# 원본(30, 40)에서 비율에 맞게 축소 (20, 30)
 font = pygame.font.SysFont(kor_font, 20)
 big_font = pygame.font.SysFont(kor_font, 30)
 
+# ──────────────────────────────────────────────
+# 스프라이트 로더
+# ──────────────────────────────────────────────
+SPRITE_DIR = os.path.join(os.path.dirname(__file__), "assets")
+
+def load_sprite(rel_path, scale=None):
+    """상대경로로 이미지 로드. 실패 시 None 반환."""
+    full = os.path.join(SPRITE_DIR, rel_path)
+    try:
+        img = pygame.image.load(full).convert_alpha()
+        if scale:
+            img = pygame.transform.scale(img, scale)
+        return img
+    except Exception:
+        return None
+
+def load_strip(rel_path, frame_w, frame_h, count, scale=None):
+    """스프라이트 스트립에서 프레임 리스트 반환."""
+    full = os.path.join(SPRITE_DIR, rel_path)
+    try:
+        sheet = pygame.image.load(full).convert_alpha()
+        frames = []
+        for i in range(count):
+            frame = sheet.subsurface(pygame.Rect(i * frame_w, 0, frame_w, frame_h))
+            if scale:
+                frame = pygame.transform.scale(frame, scale)
+            frames.append(frame)
+        return frames
+    except Exception:
+        return []
+
+# ──────────────────────────────────────────────
+# 적 스프라이트 정의
+# 각 적마다 상태별 프레임 리스트를 담은 딕셔너리.
+# 이미지가 없으면 빈 리스트 → 폴백 원형 렌더링.
+# ──────────────────────────────────────────────
+#
+# 기대 파일 구조 예시 (sprites/ 폴더 기준):
+#   sprites/red_slime/idle.png      (프레임 3장 가로 스트립, 각 24×24)
+#   sprites/red_slime/hit.png       (프레임 3장)
+#   sprites/red_slime/death.png     (프레임 4장)
+#   sprites/yellow_eye/idle.png
+#   sprites/yellow_eye/move.png     (8방향 × n프레임 스트립, 방향 순서: 위/우상/우/우하/아래/좌하/좌/좌상)
+#   sprites/yellow_eye/shoot.png
+#   sprites/yellow_eye/hit.png
+#   sprites/yellow_eye/death.png
+#   sprites/stone_guardian/idle.png
+#   sprites/stone_guardian/charge.png
+#   sprites/stone_guardian/hit.png
+#   sprites/stone_guardian/death.png
+#   sprites/shadow_bat/idle.png
+#   sprites/shadow_bat/move.png
+#   sprites/shadow_bat/hit.png
+#   sprites/shadow_bat/death.png
+#
+# 없는 파일은 그냥 건너뜁니다.
+
+FRAME_SIZE = (48, 48)   # 렌더 크기 (픽셀 아트라면 자유 변경)
+FW, FH = 100, 100         # 스프라이트 시트 내 원본 프레임 크기
+
+ENEMY_SPRITES = {
+    "red_slime": [load_sprite("red_slime.png", FRAME_SIZE)],
+    "yellow_eye": [load_sprite("yellow_eyes.png", FRAME_SIZE)],
+    "stone_guardian": [load_sprite("stone_guard.png", FRAME_SIZE)],
+    "shadow_bat": [load_sprite("shadow_bat.png", FRAME_SIZE)],
+}
+
+# 폴백 색상 (스프라이트 없을 때)
+ENEMY_FALLBACK_COLORS = {
+    "red_slime":      (220,  60,  60),
+    "yellow_eye":     (255, 220,   0),
+    "stone_guardian": (130, 130, 140),
+    "shadow_bat":     ( 80,  40, 180),
+    "boss":           (180,  40, 200),
+}
+
+# ──────────────────────────────────────────────
+# 적 팩토리
+# ──────────────────────────────────────────────
+def make_enemy(etype, pos):
+    base = {
+        "pos": list(pos),
+        "type": etype,
+        "radius": 16,
+        "stun_timer": 0,
+        "state": "idle",       # idle / move / shoot / charge / hit / death
+        "anim_frame": 0,
+        "anim_timer": 0,
+        "anim_speed": 8,       # 프레임당 게임틱
+        "facing_x": 1,
+        "dead": False,
+        # 패턴용 타이머
+        "action_timer": 0,
+        "bullet_timer": 0,
+        "charge_dir": [0, 0],
+        "charge_timer": 0,
+        "orbit_angle": 0.0,
+    }
+    presets = {
+        "red_slime":      {"hp": 20, "max_hp": 20, "speed": 1.0, "base_speed": 1.0, "radius": 14},
+        "yellow_eye":     {"hp": 15, "max_hp": 15, "speed": 1.5, "base_speed": 1.5, "radius": 13,
+                           "bullet_timer": 120},
+        "stone_guardian": {"hp": 40, "max_hp": 40, "speed": 0.6, "base_speed": 0.6, "radius": 18,
+                           "charge_timer": 0, "charge_cooldown": 180},
+        "shadow_bat":     {"hp": 10, "max_hp": 10, "speed": 2.2, "base_speed": 2.2, "radius": 12,
+                           "orbit_angle": random.uniform(0, math.pi*2)},
+        "boss":           {"hp": 300, "max_hp": 300, "speed": 1.5, "base_speed": 1.5, "radius": 35},
+    }
+    base.update(presets.get(etype, {}))
+    return base
+
+# 총알 리스트 (yellow_eye 발사체)
+bullets = []
+
+def spawn_bullet(pos, target_pos, dmg=8):
+    dx, dy = target_pos[0] - pos[0], target_pos[1] - pos[1]
+    dist = math.hypot(dx, dy)
+    if dist == 0:
+        return
+    speed = 5
+    bullets.append({
+        "pos": list(pos),
+        "vx": (dx/dist)*speed,
+        "vy": (dy/dist)*speed,
+        "radius": 6,
+        "dmg": dmg,
+        "timer": 180,
+        "color": (255, 220, 0),
+    })
+
+# ──────────────────────────────────────────────
+# 애니메이션 헬퍼
+# ──────────────────────────────────────────────
+def get_frame(e):
+    """현재 상태에 맞는 Surface 반환. 없으면 None."""
+    frames = ENEMY_SPRITES.get(e["type"])
+    if not frames or frames[0] is None:
+        return None
+    return frames[0]
+
+def advance_anim(e, loop=True):
+    """타이머 기반 프레임 전진."""
+    count = 4  # 가상의 애니메이션 길이 (사망 처리 등 타이머 용도)
+    e["anim_timer"] += 1
+    if e["anim_timer"] >= e["anim_speed"]:
+        e["anim_timer"] = 0
+        e["anim_frame"] += 1
+        if e["anim_frame"] >= count:
+            if loop:
+                e["anim_frame"] = 0
+            else:
+                e["anim_frame"] = count - 1
+                return True  # 애니메이션 완료
+    return False
+
+def set_state(e, state):
+    if e["state"] != state:
+        e["state"] = state
+        e["anim_frame"] = 0
+        e["anim_timer"] = 0
+
+# ──────────────────────────────────────────────
+# 적 AI 업데이트
+# ──────────────────────────────────────────────
+def update_enemy(e, player_pos, player_hp, room_enemies, active_fields, dm):
+    if e["dead"] or e["hp"] <= 0:
+        if not e["dead"]:
+            e["dead"] = True
+            set_state(e, "death")
+        done = advance_anim(e, loop=False)
+        return  # 사망 처리는 메인루프에서
+
+    # 스턴
+    if e.get("stun_timer", 0) > 0:
+        e["stun_timer"] -= 1
+        set_state(e, "hit")
+        advance_anim(e, loop=False)
+        return
+
+    etype = e["type"]
+
+    # ── 레드 슬라임: 직선 추적 ──────────────────
+    if etype == "red_slime":
+        dx, dy = player_pos[0]-e["pos"][0], player_pos[1]-e["pos"][1]
+        dist = math.hypot(dx, dy)
+        if dist > 0 and player_hp > 0:
+            e["pos"][0] += (dx/dist)*e["speed"]
+            e["pos"][1] += (dy/dist)*e["speed"]
+            e["facing_x"] = 1 if dx >= 0 else -1
+            set_state(e, "idle")   # 슬라임은 idle 루프만 사용
+        advance_anim(e)
+
+    # ── 옐로우 아이: 추적 → 일정 거리 정지 → 발사 ──
+    elif etype == "yellow_eye":
+        dx, dy = player_pos[0]-e["pos"][0], player_pos[1]-e["pos"][1]
+        dist = math.hypot(dx, dy)
+        STOP_DIST = 180
+
+        e["bullet_timer"] = e.get("bullet_timer", 120) - 1
+
+        if dist > STOP_DIST and player_hp > 0:
+            spd = e["speed"]
+            e["pos"][0] += (dx/dist)*spd
+            e["pos"][1] += (dy/dist)*spd
+            e["facing_x"] = 1 if dx >= 0 else -1
+            set_state(e, "move")
+        else:
+            set_state(e, "idle")
+
+        if e["bullet_timer"] <= 0:
+            set_state(e, "shoot")
+            spawn_bullet(list(e["pos"]), player_pos, dmg=8)
+            e["bullet_timer"] = random.randint(90, 150)
+        advance_anim(e)
+
+    # ── 스톤 가디언: 돌진 후 잠시 멈춤 ───────────
+    elif etype == "stone_guardian":
+        CHARGE_RANGE = 300
+        dx, dy = player_pos[0]-e["pos"][0], player_pos[1]-e["pos"][1]
+        dist = math.hypot(dx, dy)
+
+        if e.get("charge_timer", 0) > 0:
+            # 돌진 중
+            e["pos"][0] += e["charge_dir"][0] * e["speed"] * 4
+            e["pos"][1] += e["charge_dir"][1] * e["speed"] * 4
+            e["charge_timer"] -= 1
+            set_state(e, "charge")
+            if e["charge_timer"] == 0:
+                # 돌진 후 멈춤 (stun처럼 사용)
+                e["stun_timer"] = 45
+        else:
+            e["action_timer"] = e.get("action_timer", 0) - 1
+            if e["action_timer"] <= 0 and dist < CHARGE_RANGE and player_hp > 0:
+                # 돌진 시작
+                if dist > 0:
+                    e["charge_dir"] = [dx/dist, dy/dist]
+                e["charge_timer"] = 25
+                e["action_timer"] = e.get("charge_cooldown", 180)
+                e["facing_x"] = 1 if dx >= 0 else -1
+            else:
+                set_state(e, "idle")
+        advance_anim(e)
+
+    # ── 새도우 박쥐: 플레이어 주변 원형 비행 ──────
+    elif etype == "shadow_bat":
+        e["orbit_angle"] = e.get("orbit_angle", 0) + 0.04
+        ORBIT_R = 130
+        target_x = player_pos[0] + math.cos(e["orbit_angle"]) * ORBIT_R
+        target_y = player_pos[1] + math.sin(e["orbit_angle"]) * ORBIT_R
+        tdx = target_x - e["pos"][0]
+        tdy = target_y - e["pos"][1]
+        tdist = math.hypot(tdx, tdy)
+        if tdist > 0 and player_hp > 0:
+            spd = min(e["speed"] * 2, tdist)
+            e["pos"][0] += (tdx/tdist)*spd
+            e["pos"][1] += (tdy/tdist)*spd
+            e["facing_x"] = 1 if tdx >= 0 else -1
+        set_state(e, "move")
+        advance_anim(e)
+
+    # ── 보스: 기본 추적 (추후 확장) ─────────────
+    else:
+        dx, dy = player_pos[0]-e["pos"][0], player_pos[1]-e["pos"][1]
+        dist = math.hypot(dx, dy)
+        if dist > 0 and player_hp > 0:
+            e["pos"][0] += (dx/dist)*e["speed"]
+            e["pos"][1] += (dy/dist)*e["speed"]
+        set_state(e, "idle")
+        advance_anim(e)
+
+
+# ──────────────────────────────────────────────
+# 적 렌더러
+# ──────────────────────────────────────────────
+def draw_enemy(surface, e):
+    px, py = int(e["pos"][0]), int(e["pos"][1])
+    frame = get_frame(e)
+    if frame:
+        dx = player_pos[0] - px
+        dy = player_pos[1] - py
+        angle = math.degrees(math.atan2(-dy, dx))
+        rotated_frame = pygame.transform.rotate(frame, angle)
+        rect = rotated_frame.get_rect(center=(px, py))
+        surface.blit(rotated_frame, rect)
+    else:
+        # 폴백: 색깔 원
+        color = ENEMY_FALLBACK_COLORS.get(e["type"], ENEMY_COLOR)
+        if e["dead"]:
+            alpha_val = max(0, int(255 * (e["anim_frame"] / 4)))
+            temp = pygame.Surface((e["radius"]*2, e["radius"]*2), pygame.SRCALPHA)
+            pygame.draw.circle(temp, (*color, alpha_val), (e["radius"], e["radius"]), e["radius"])
+            surface.blit(temp, (px - e["radius"], py - e["radius"]))
+        else:
+            pygame.draw.circle(surface, color, (px, py), e["radius"])
+            if e.get("stun_timer", 0) > 0:
+                pygame.draw.circle(surface, WHITE, (px, py), e["radius"] + 4, 2)
+
+    if not e["dead"]:
+        bar_w = e["radius"] * 3
+        bx, by = px - bar_w // 2, py - e["radius"] - 14
+        pygame.draw.rect(surface, HP_RED, (bx, by, bar_w, 7))
+        pygame.draw.rect(surface, HP_GREEN, (bx, by, int(bar_w * max(0, e["hp"] / e["max_hp"])), 7))
+
+
+# ──────────────────────────────────────────────
+# 기존 맵 / 플레이어 시스템 (거의 동일)
+# ──────────────────────────────────────────────
 def generate_map(num_rooms=10):
     rooms = {}
-    rooms[(0, 0)] = {"visited": False, "type": "start", "enemies": [], "cleared": True, "reward": None}
-    directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]
-    room_coords = [(0, 0)]
-    
+    rooms[(0,0)] = {"visited": False, "type": "start", "enemies": [], "cleared": True, "reward": None}
+    directions = [(0,-1),(0,1),(-1,0),(1,0)]
+    room_coords = [(0,0)]
     while len(rooms) < num_rooms:
         curr = random.choice(room_coords)
         dx, dy = random.choice(directions)
-        next_room = (curr[0] + dx, curr[1] + dy)
-        if next_room not in rooms:
-            rooms[next_room] = {"visited": False, "type": "normal", "enemies": [], "cleared": False, "reward": None}
-            room_coords.append(next_room)
-            
+        nxt = (curr[0]+dx, curr[1]+dy)
+        if nxt not in rooms:
+            rooms[nxt] = {"visited": False, "type": "normal", "enemies": [], "cleared": False, "reward": None}
+            room_coords.append(nxt)
     rooms[room_coords[-1]]["type"] = "boss"
     return rooms
 
 world_map = generate_map(10)
-current_coords = (0, 0)
-ROOM_RECT = pygame.Rect(60, 60, WIDTH - 120, HEIGHT - 180)
+current_coords = (0,0)
+ROOM_RECT = pygame.Rect(60, 60, WIDTH-120, HEIGHT-180)
 
-player_pos = [WIDTH // 2, ROOM_RECT.centery]
-player_facing = [1, 0] 
+player_pos = [WIDTH//2, ROOM_RECT.centery]
+player_facing = [1,0]
 player_speed = 5
 player_radius = 15
-player_words = ["attack"] 
-player_shapes = [] 
+player_words = ["attack"]
+player_shapes = []
 player_max_hp = 100
 player_hp = 100
 player_immune_timer = 0
 
 player_stats = {
-    "skill_duration_mult": 1.0,
-    "radius_mult": 1.0,
-    "damage_mult": 1.0,
-    "speed_mult": 1.0,
-    "thorns_damage": 0,
-    "defense_up": 0.0
+    "skill_duration_mult": 1.0, "radius_mult": 1.0,
+    "damage_mult": 1.0, "speed_mult": 1.0,
+    "thorns_damage": 0, "defense_up": 0.0
 }
-player_items = {
-    "pet": False,
-    "elemental_blade": False,
-    "map_reveal": False
-}
-pet_pos = [WIDTH // 2, ROOM_RECT.centery]
+player_items = {"pet": False, "elemental_blade": False, "map_reveal": False}
+pet_pos = [WIDTH//2, ROOM_RECT.centery]
 pet_attack_timer = 0
 
 STACKABLE_ITEMS = [
-    {"id": "duration_up", "name": "모래시계"},
-    {"id": "radius_up", "name": "확대경"},
-    {"id": "damage_up", "name": "전사의 검"},
-    {"id": "speed_up", "name": "바람의 부츠"},
-    {"id": "thorns", "name": "가시 갑옷"},
-    {"id": "hp_up", "name": "생명의 심장"},
-    {"id": "defense_up", "name": "강철 방패"}
+    {"id":"duration_up","name":"모래시계"}, {"id":"radius_up","name":"확대경"},
+    {"id":"damage_up","name":"전사의 검"}, {"id":"speed_up","name":"바람의 부츠"},
+    {"id":"thorns","name":"가시 갑옷"}, {"id":"hp_up","name":"생명의 심장"},
+    {"id":"defense_up","name":"강철 방패"}
 ]
-
 NON_STACKABLE_ITEMS = [
-    {"id": "pet", "name": "미니 슬라임"},
-    {"id": "elemental_blade", "name": "속성 부여검"},
-    {"id": "map_reveal", "name": "마법 지도"}
+    {"id":"pet","name":"미니 슬라임"}, {"id":"elemental_blade","name":"속성 부여검"},
+    {"id":"map_reveal","name":"마법 지도"}
 ]
 
 input_text = ""
 attack_timer = 0
-attack_data = {"angle": 0, "radius": 0, "half_cone": 0}
+attack_data = {"angle":0,"radius":0,"half_cone":0}
 message = "플레이 해보세요"
 message_timer = 180
-
 active_fields = []
 
 def spawn_field(f_type, pos, radius, duration, shape, vx=0, vy=0):
     active_fields.append({
-        "pos": list(pos), "type": f_type, "radius": radius, 
-        "timer": duration, "max_timer": duration, 
+        "pos": list(pos), "type": f_type, "radius": radius,
+        "timer": duration, "max_timer": duration,
         "shape": shape, "vx": vx, "vy": vy
     })
 
 def cast_spell(element, shape, p_pos, facing, target_e):
     duration, radius = 240, 80
-    
     if element == "attack": duration, radius = 40, 80
     elif element == "bomb": duration, radius = 20, 120
     elif element == "guard": duration, radius = 300, 60
     elif element == "heal": duration, radius = 240, 70
-
-    if shape == "spike": duration, radius = min(duration, 60), 60
-    elif shape == "ball": duration, radius = min(duration, 120), 40
+    if shape == "spike": duration, radius = min(duration,60), 60
+    elif shape == "ball": duration, radius = min(duration,120), 40
     elif shape == "square": duration, radius = 300, 60
-
-    if duration > 60: 
+    if duration > 60:
         duration = int(duration * player_stats["skill_duration_mult"])
     radius = int(radius * player_stats["radius_mult"])
-
     vx, vy = 0, 0
-    
-    if shape == "field": 
+    if shape == "field":
         spawn_pos = list(p_pos)
     elif shape == "ball":
         spawn_pos = list(p_pos)
         if target_e:
-            dx, dy = target_e["pos"][0] - p_pos[0], target_e["pos"][1] - p_pos[1]
-            dist = math.hypot(dx, dy)
-            if dist > 0: vx, vy = (dx/dist)*12, (dy/dist)*12
-        else: vx, vy = facing[0]*12, facing[1]*12
+            dx,dy = target_e["pos"][0]-p_pos[0], target_e["pos"][1]-p_pos[1]
+            dist = math.hypot(dx,dy)
+            if dist>0: vx,vy = (dx/dist)*12,(dy/dist)*12
+        else: vx,vy = facing[0]*12,facing[1]*12
     elif shape == "spike":
-        spawn_pos = list(target_e["pos"]) if target_e else [p_pos[0] + facing[0]*100, p_pos[1] + facing[1]*100]
+        spawn_pos = list(target_e["pos"]) if target_e else [p_pos[0]+facing[0]*100,p_pos[1]+facing[1]*100]
     elif shape == "square":
         if target_e:
-            dx, dy = target_e["pos"][0] - p_pos[0], target_e["pos"][1] - p_pos[1]
-            dist = math.hypot(dx, dy)
-            spawn_pos = [p_pos[0] + (dx/dist)*80, p_pos[1] + (dy/dist)*80] if dist > 0 else list(p_pos)
-        else: spawn_pos = [p_pos[0] + facing[0]*80, p_pos[1] + facing[1]*80]
-            
+            dx,dy = target_e["pos"][0]-p_pos[0],target_e["pos"][1]-p_pos[1]
+            dist = math.hypot(dx,dy)
+            spawn_pos = [p_pos[0]+(dx/dist)*80,p_pos[1]+(dy/dist)*80] if dist>0 else list(p_pos)
+        else: spawn_pos = [p_pos[0]+facing[0]*80,p_pos[1]+facing[1]*80]
     spawn_field(element, spawn_pos, radius, duration, shape, vx, vy)
+
+# 일반 적 종류 목록 (normal 방에서 랜덤 스폰)
+NORMAL_ENEMY_TYPES = ["red_slime", "yellow_eye", "stone_guardian", "shadow_bat"]
 
 def enter_room(coords):
     global current_coords, message, message_timer
@@ -176,41 +452,43 @@ def enter_room(coords):
     room = world_map[coords]
     room["visited"] = True
     active_fields.clear()
-    
-    if not room["cleared"] and len(room["enemies"]) == 0 and coords != (0,0):
+    bullets.clear()
+    if not room["cleared"] and len(room["enemies"])==0 and coords!=(0,0):
         if room["type"] == "normal":
-            for _ in range(random.randint(2, 4)):
-                room["enemies"].append({
-                    "pos": [random.randint(150, WIDTH-150), random.randint(150, ROOM_RECT.bottom - 100)],
-                    "hp": 50, "max_hp": 50, "speed": 2.0, "base_speed": 2.0, 
-                    "type": "normal", "radius": 12, "stun_timer": 0
-                })
+            for _ in range(random.randint(2,4)):
+                etype = random.choice(NORMAL_ENEMY_TYPES)
+                e = make_enemy(etype, [
+                    random.randint(150, WIDTH-150),
+                    random.randint(150, ROOM_RECT.bottom-100)
+                ])
+                room["enemies"].append(e)
         elif room["type"] == "boss":
-            room["enemies"].append({
-                "pos": [WIDTH//2, ROOM_RECT.centery],
-                "hp": 300, "max_hp": 300, "speed": 1.5, "base_speed": 1.5, 
-                "type": "boss", "radius": 35, "stun_timer": 0
-            })
+            e = make_enemy("boss", [WIDTH//2, ROOM_RECT.centery])
+            room["enemies"].append(e)
 
 enter_room((0,0))
 
 def is_discovered(coords):
     if player_items.get("map_reveal", False): return True
     if world_map[coords]["visited"]: return True
-    for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-        neighbor = (coords[0] + dx, coords[1] + dy)
-        if neighbor in world_map and world_map[neighbor]["visited"]: return True
+    for dx,dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+        nb = (coords[0]+dx,coords[1]+dy)
+        if nb in world_map and world_map[nb]["visited"]: return True
     return False
 
+# ──────────────────────────────────────────────
+# 메인 루프
+# ──────────────────────────────────────────────
 running = True
 while running:
     screen.fill(BLACK)
     room = world_map[current_coords]
-    room_cleared = (len(room["enemies"]) == 0)
-    
+    living_enemies = [e for e in room["enemies"] if not e["dead"] and e["hp"] > 0]
+    room_cleared = (len(living_enemies) == 0)
+
     if player_immune_timer > 0:
         player_immune_timer -= 1
-        
+
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -218,11 +496,11 @@ while running:
             if event.key == pygame.K_RETURN:
                 cmd = input_text.strip().lower()
                 input_text = ""
-                
-                # 치트키 시스템
+
+                # ── 치트키 ──────────────────────────────
                 if cmd == "cheat":
-                    player_words = ["attack", "fire", "poison", "ice", "bomb", "tree", "guard", "heal"]
-                    player_shapes = ["ball", "square", "spike"]
+                    player_words = ["attack","fire","poison","ice","bomb","tree","guard","heal"]
+                    player_shapes = ["ball","square","spike"]
                     player_items["pet"] = True
                     player_items["elemental_blade"] = True
                     player_items["map_reveal"] = True
@@ -232,470 +510,416 @@ while running:
                     player_stats["radius_mult"] = 1.5
                     player_stats["defense_up"] = 0.5
                     player_stats["thorns_damage"] = 20
-                    player_max_hp = 200
-                    player_hp = 200
-                    message = " 치트 활성화: 단어, 형태, 아이템 모두 획득!"
-                    message_timer = 180
-                    continue
+                    player_max_hp = 200; player_hp = 200
+                    message = "치트 활성화!"; message_timer = 180; continue
                 elif cmd == "cheat word":
-                    player_words = ["attack", "fire", "poison", "ice", "bomb", "tree", "guard", "heal"]
-                    player_shapes = ["ball", "square", "spike"]
-                    message = " 치트1 활성화: 모든 마법 단어와 형태 획득!"
-                    message_timer = 180
-                    continue
+                    player_words = ["attack","fire","poison","ice","bomb","tree","guard","heal"]
+                    player_shapes = ["ball","square","spike"]
+                    message = "치트1: 모든 단어/형태!"; message_timer = 180; continue
                 elif cmd == "cheat item":
                     player_items["pet"] = True
                     player_items["elemental_blade"] = True
                     player_items["map_reveal"] = True
-                    player_stats["speed_mult"] = 1.5
-                    player_stats["damage_mult"] = 3.0
-                    player_stats["skill_duration_mult"] = 2.0
-                    player_stats["radius_mult"] = 1.5
-                    player_stats["defense_up"] = 0.5
-                    player_stats["thorns_damage"] = 20
-                    player_max_hp = 200
-                    player_hp = 200
-                    message = " 치트2 활성화: 모든 아이템 및 스탯 상승!"
-                    message_timer = 180
-                    continue
+                    player_stats["speed_mult"] = 1.5; player_stats["damage_mult"] = 3.0
+                    player_stats["skill_duration_mult"] = 2.0; player_stats["radius_mult"] = 1.5
+                    player_stats["defense_up"] = 0.5; player_stats["thorns_damage"] = 20
+                    player_max_hp = 200; player_hp = 200
+                    message = "치트2: 모든 아이템!"; message_timer = 180; continue
 
                 tokens = cmd.split()
                 if len(tokens) > 0:
                     element = tokens[0]
                     shape = tokens[1] if len(tokens) > 1 else "field"
-                    
+
                     if element == "attack" and shape == "field":
                         attack_radius = 140 * player_stats["radius_mult"]
-                        cone_angle = math.radians(60)
-                        half_cone = cone_angle / 2
-                        base_angle = 0 
-                        if room["enemies"]:
-                            closest_e = min(room["enemies"], key=lambda e: math.hypot(e["pos"][0]-player_pos[0], e["pos"][1]-player_pos[1]))
-                            dx = closest_e["pos"][0] - player_pos[0]
-                            dy = closest_e["pos"][1] - player_pos[1]
-                            base_angle = math.atan2(dy, dx)
-                            for e in room["enemies"]:
-                                edx = e["pos"][0] - player_pos[0]
-                                edy = e["pos"][1] - player_pos[1]
-                                dist = math.hypot(edx, edy)
+                        half_cone = math.radians(30)
+                        base_angle = 0
+                        if living_enemies:
+                            closest_e = min(living_enemies, key=lambda e: math.hypot(e["pos"][0]-player_pos[0], e["pos"][1]-player_pos[1]))
+                            dx = closest_e["pos"][0]-player_pos[0]
+                            dy = closest_e["pos"][1]-player_pos[1]
+                            base_angle = math.atan2(dy,dx)
+                            for e in living_enemies:
+                                edx = e["pos"][0]-player_pos[0]
+                                edy = e["pos"][1]-player_pos[1]
+                                dist = math.hypot(edx,edy)
                                 if dist <= attack_radius:
-                                    target_angle = math.atan2(edy, edx)
-                                    angle_diff = (target_angle - base_angle + math.pi) % (2 * math.pi) - math.pi
-                                    if abs(angle_diff) <= half_cone: 
+                                    target_angle = math.atan2(edy,edx)
+                                    angle_diff = (target_angle-base_angle+math.pi)%(2*math.pi)-math.pi
+                                    if abs(angle_diff) <= half_cone:
                                         e["hp"] -= 15 * player_stats["damage_mult"]
                                         if player_items["elemental_blade"]:
-                                            rand_elem = random.choice(["fire", "ice", "poison", "bomb", "tree"])
-                                            if rand_elem == "fire": e["hp"] -= 5 * player_stats["damage_mult"]
-                                            elif rand_elem == "ice": e["speed"] *= 0.3
-                                            elif rand_elem == "poison": e["hp"] -= 3 * player_stats["damage_mult"]
-                                            elif rand_elem == "bomb": e["hp"] -= 10 * player_stats["damage_mult"]
-                                            elif rand_elem == "tree": e["stun_timer"] = max(e.get("stun_timer",0), 30)
-                                        
+                                            rand_elem = random.choice(["fire","ice","poison","bomb","tree"])
+                                            if rand_elem=="fire": e["hp"] -= 5*player_stats["damage_mult"]
+                                            elif rand_elem=="ice": e["speed"] *= 0.3
+                                            elif rand_elem=="poison": e["hp"] -= 3*player_stats["damage_mult"]
+                                            elif rand_elem=="bomb": e["hp"] -= 10*player_stats["damage_mult"]
+                                            elif rand_elem=="tree": e["stun_timer"] = max(e.get("stun_timer",0),30)
                         attack_timer = 15
-                        attack_data = {"angle": base_angle, "radius": attack_radius, "half_cone": half_cone}
+                        attack_data = {"angle":base_angle,"radius":attack_radius,"half_cone":half_cone}
 
                     elif element in player_words and (shape in player_shapes or shape == "field"):
-                        closest_e = min(room["enemies"], key=lambda e: math.hypot(e["pos"][0]-player_pos[0], e["pos"][1]-player_pos[1])) if room["enemies"] else None
+                        closest_e = min(living_enemies, key=lambda e: math.hypot(e["pos"][0]-player_pos[0],e["pos"][1]-player_pos[1])) if living_enemies else None
                         cast_spell(element, shape, player_pos, player_facing, closest_e)
                     else:
-                        message = "미획득 단어/형태 조합입니다!"
-                        message_timer = 60
+                        message = "미획득 단어/형태 조합입니다!"; message_timer = 60
 
             elif event.key == pygame.K_BACKSPACE: input_text = input_text[:-1]
             elif event.key == pygame.K_SPACE: input_text += " "
             elif event.unicode != "":
-                if event.unicode.isalpha() or ('가' <= event.unicode <= '힣'):
+                if event.unicode.isalpha() or ('가'<=event.unicode<='힣'):
                     input_text += event.unicode
 
+    # ── 플레이어 이동 ──────────────────────────
     if player_hp > 0:
         ps = player_speed * player_stats["speed_mult"]
         keys = pygame.key.get_pressed()
-        new_x, new_y = player_pos[0], player_pos[1]
-        if keys[pygame.K_LEFT]:  new_x -= ps; player_facing = [-1, 0]
-        if keys[pygame.K_RIGHT]: new_x += ps; player_facing = [1, 0]
-        if keys[pygame.K_UP]:    new_y -= ps; player_facing = [0, -1]
-        if keys[pygame.K_DOWN]:  new_y += ps; player_facing = [0, 1]
+        nx, ny = player_pos[0], player_pos[1]
+        if keys[pygame.K_LEFT]:  nx -= ps; player_facing = [-1,0]
+        if keys[pygame.K_RIGHT]: nx += ps; player_facing = [1,0]
+        if keys[pygame.K_UP]:    ny -= ps; player_facing = [0,-1]
+        if keys[pygame.K_DOWN]:  ny += ps; player_facing = [0,1]
     else:
-        new_x, new_y = player_pos[0], player_pos[1]
+        nx, ny = player_pos[0], player_pos[1]
 
     door_w = 80
-    if new_x - player_radius < ROOM_RECT.left:
-        target = (current_coords[0] - 1, current_coords[1])
-        if target in world_map and (ROOM_RECT.centery - door_w//2 < new_y < ROOM_RECT.centery + door_w//2) and room_cleared:
-            enter_room(target); new_x = ROOM_RECT.right - player_radius - 10
-        else: new_x = ROOM_RECT.left + player_radius
-    elif new_x + player_radius > ROOM_RECT.right:
-        target = (current_coords[0] + 1, current_coords[1])
-        if target in world_map and (ROOM_RECT.centery - door_w//2 < new_y < ROOM_RECT.centery + door_w//2) and room_cleared:
-            enter_room(target); new_x = ROOM_RECT.left + player_radius + 10
-        else: new_x = ROOM_RECT.right - player_radius
-    if new_y - player_radius < ROOM_RECT.top:
-        target = (current_coords[0], current_coords[1] - 1)
-        if target in world_map and (WIDTH//2 - door_w//2 < new_x < WIDTH//2 + door_w//2) and room_cleared:
-            enter_room(target); new_y = ROOM_RECT.bottom - player_radius - 10
-        else: new_y = ROOM_RECT.top + player_radius
-    elif new_y + player_radius > ROOM_RECT.bottom:
-        target = (current_coords[0], current_coords[1] + 1)
-        if target in world_map and (WIDTH//2 - door_w//2 < new_x < WIDTH//2 + door_w//2) and room_cleared:
-            enter_room(target); new_y = ROOM_RECT.top + player_radius + 10
-        else: new_y = ROOM_RECT.bottom - player_radius
-    player_pos[0], player_pos[1] = new_x, new_y
+    if nx-player_radius < ROOM_RECT.left:
+        tgt = (current_coords[0]-1, current_coords[1])
+        if tgt in world_map and (ROOM_RECT.centery-door_w//2<ny<ROOM_RECT.centery+door_w//2) and room_cleared:
+            enter_room(tgt); nx = ROOM_RECT.right-player_radius-10
+        else: nx = ROOM_RECT.left+player_radius
+    elif nx+player_radius > ROOM_RECT.right:
+        tgt = (current_coords[0]+1, current_coords[1])
+        if tgt in world_map and (ROOM_RECT.centery-door_w//2<ny<ROOM_RECT.centery+door_w//2) and room_cleared:
+            enter_room(tgt); nx = ROOM_RECT.left+player_radius+10
+        else: nx = ROOM_RECT.right-player_radius
+    if ny-player_radius < ROOM_RECT.top:
+        tgt = (current_coords[0], current_coords[1]-1)
+        if tgt in world_map and (WIDTH//2-door_w//2<nx<WIDTH//2+door_w//2) and room_cleared:
+            enter_room(tgt); ny = ROOM_RECT.bottom-player_radius-10
+        else: ny = ROOM_RECT.top+player_radius
+    elif ny+player_radius > ROOM_RECT.bottom:
+        tgt = (current_coords[0], current_coords[1]+1)
+        if tgt in world_map and (WIDTH//2-door_w//2<nx<WIDTH//2+door_w//2) and room_cleared:
+            enter_room(tgt); ny = ROOM_RECT.top+player_radius+10
+        else: ny = ROOM_RECT.bottom-player_radius
+    player_pos[0], player_pos[1] = nx, ny
 
+    # ── 속도 초기화 ────────────────────────────
     for e in room["enemies"]:
-        e["speed"] = e["base_speed"]
-        
+        if not e["dead"]:
+            e["speed"] = e["base_speed"]
+
+    # ── ball 이동 ──────────────────────────────
     for f in active_fields:
         if f["shape"] == "ball":
-            f["pos"][0] += f["vx"]
-            f["pos"][1] += f["vy"]
+            f["pos"][0] += f["vx"]; f["pos"][1] += f["vy"]
 
+    # ── 펫 ────────────────────────────────────
     if player_items["pet"] and player_hp > 0:
-        pet_pos[0] += (player_pos[0] - 35 - pet_pos[0]) * 0.05
-        pet_pos[1] += (player_pos[1] - 35 - pet_pos[1]) * 0.05
-        
+        pet_pos[0] += (player_pos[0]-35-pet_pos[0])*0.05
+        pet_pos[1] += (player_pos[1]-35-pet_pos[1])*0.05
         pet_attack_timer -= 1
-        if pet_attack_timer <= 0 and room["enemies"]:
-            closest_e = min(room["enemies"], key=lambda e: math.hypot(e["pos"][0]-pet_pos[0], e["pos"][1]-pet_pos[1]))
-            dx, dy = closest_e["pos"][0] - pet_pos[0], closest_e["pos"][1] - pet_pos[1]
-            dist = math.hypot(dx, dy)
-            if dist > 0:
-                vx, vy = (dx/dist)*10, (dy/dist)*10
-                spawn_field("attack", list(pet_pos), int(25 * player_stats["radius_mult"]), 30, "ball", vx, vy)
-            pet_attack_timer = 90 
+        if pet_attack_timer <= 0 and living_enemies:
+            closest_e = min(living_enemies, key=lambda e: math.hypot(e["pos"][0]-pet_pos[0],e["pos"][1]-pet_pos[1]))
+            dx,dy = closest_e["pos"][0]-pet_pos[0], closest_e["pos"][1]-pet_pos[1]
+            dist = math.hypot(dx,dy)
+            if dist>0:
+                vx,vy = (dx/dist)*10,(dy/dist)*10
+                spawn_field("attack", list(pet_pos), int(25*player_stats["radius_mult"]), 30, "ball", vx, vy)
+            pet_attack_timer = 90
 
-    combo_removes = []
-    combo_adds = []
-    
+    # ── 콤보 ──────────────────────────────────
+    combo_removes, combo_adds = [], []
     def create_combo(ctype, base_rad, base_dur, cx, cy):
-        rad = int(base_rad * player_stats["radius_mult"])
-        dur = base_dur if base_dur <= 60 else int(base_dur * player_stats["skill_duration_mult"])
-        return {"pos": [cx, cy], "type": ctype, "radius": rad, "timer": dur, "max_timer": dur, "shape": "field", "vx": 0, "vy": 0}
+        r = int(base_rad*player_stats["radius_mult"])
+        d = base_dur if base_dur<=60 else int(base_dur*player_stats["skill_duration_mult"])
+        return {"pos":[cx,cy],"type":ctype,"radius":r,"timer":d,"max_timer":d,"shape":"field","vx":0,"vy":0}
 
     for i in range(len(active_fields)):
-        for j in range(i + 1, len(active_fields)):
-            f1, f2 = active_fields[i], active_fields[j]
+        for j in range(i+1,len(active_fields)):
+            f1,f2 = active_fields[i],active_fields[j]
             if f1 in combo_removes or f2 in combo_removes: continue
-                
-            dist = math.hypot(f1["pos"][0] - f2["pos"][0], f1["pos"][1] - f2["pos"][1])
-            if dist < f1["radius"] + f2["radius"]:
-                combo = {f1["type"], f2["type"]}
-                mid_x = (f1["pos"][0] + f2["pos"][0]) / 2
-                mid_y = (f1["pos"][1] + f2["pos"][1]) / 2
-                
-                if combo == {"fire", "poison"}: 
-                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("explosion", 150, 20, mid_x, mid_y))
-                elif combo == {"fire", "ice"}: 
-                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("steam", 130, 240, mid_x, mid_y))
-                elif combo == {"ice", "poison"}: 
-                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("plague_storm", 140, 300, mid_x, mid_y))
-                elif combo == {"bomb", "poison"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("toxic_cloud", 180, 400, mid_x, mid_y))
-                elif combo == {"heal", "tree"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("sanctuary", 160, 300, mid_x, mid_y))
-                elif combo == {"fire", "tree"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("wildfire", 150, 120, mid_x, mid_y))
-                elif combo == {"guard", "ice"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("glacial_barricade", 140, 300, mid_x, mid_y))
-                elif combo == {"guard", "bomb"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("counter_shield", 130, 150, mid_x, mid_y))
-                elif combo == {"guard", "heal"}:
-                    combo_removes.extend([f1, f2]); combo_adds.append(create_combo("divine_grace", 160, 240, mid_x, mid_y))
+            dist = math.hypot(f1["pos"][0]-f2["pos"][0],f1["pos"][1]-f2["pos"][1])
+            if dist < f1["radius"]+f2["radius"]:
+                combo = {f1["type"],f2["type"]}
+                mx = (f1["pos"][0]+f2["pos"][0])/2
+                my = (f1["pos"][1]+f2["pos"][1])/2
+                if combo=={"fire","poison"}:   combo_removes.extend([f1,f2]); combo_adds.append(create_combo("explosion",150,20,mx,my))
+                elif combo=={"fire","ice"}:    combo_removes.extend([f1,f2]); combo_adds.append(create_combo("steam",130,240,mx,my))
+                elif combo=={"ice","poison"}:  combo_removes.extend([f1,f2]); combo_adds.append(create_combo("plague_storm",140,300,mx,my))
+                elif combo=={"bomb","poison"}: combo_removes.extend([f1,f2]); combo_adds.append(create_combo("toxic_cloud",180,400,mx,my))
+                elif combo=={"heal","tree"}:   combo_removes.extend([f1,f2]); combo_adds.append(create_combo("sanctuary",160,300,mx,my))
+                elif combo=={"fire","tree"}:   combo_removes.extend([f1,f2]); combo_adds.append(create_combo("wildfire",150,120,mx,my))
+                elif combo=={"guard","ice"}:   combo_removes.extend([f1,f2]); combo_adds.append(create_combo("glacial_barricade",140,300,mx,my))
+                elif combo=={"guard","bomb"}:  combo_removes.extend([f1,f2]); combo_adds.append(create_combo("counter_shield",130,150,mx,my))
+                elif combo=={"guard","heal"}:  combo_removes.extend([f1,f2]); combo_adds.append(create_combo("divine_grace",160,240,mx,my))
 
     for f in combo_removes:
         if f in active_fields: active_fields.remove(f)
     active_fields.extend(combo_adds)
 
+    # ── 필드 피해 ─────────────────────────────
     for f in active_fields[:]:
         f["timer"] -= 1
         if f["timer"] <= 0:
-            active_fields.remove(f)
-            continue
+            active_fields.remove(f); continue
 
-        p_dist = math.hypot(player_pos[0] - f["pos"][0], player_pos[1] - f["pos"][1])
+        p_dist = math.hypot(player_pos[0]-f["pos"][0], player_pos[1]-f["pos"][1])
         is_p_hit = False
-        if f["shape"] in ["field", "ball", "spike"] and p_dist <= f["radius"] + player_radius: is_p_hit = True
-        elif f["shape"] == "square" and (abs(player_pos[0]-f["pos"][0]) <= f["radius"]+player_radius) and (abs(player_pos[1]-f["pos"][1]) <= f["radius"]+player_radius): is_p_hit = True
-        
+        if f["shape"] in ["field","ball","spike"] and p_dist<=f["radius"]+player_radius: is_p_hit=True
+        elif f["shape"]=="square" and (abs(player_pos[0]-f["pos"][0])<=f["radius"]+player_radius) and (abs(player_pos[1]-f["pos"][1])<=f["radius"]+player_radius): is_p_hit=True
+
         if is_p_hit:
-            if f["type"] == "heal": player_hp = min(player_max_hp, player_hp + 0.2)
-            elif f["type"] == "guard": player_immune_timer = max(player_immune_timer, 10)
-            elif f["type"] == "sanctuary": player_hp = min(player_max_hp, player_hp + 0.5)
-            elif f["type"] == "divine_grace": 
-                player_immune_timer = max(player_immune_timer, 10)
-                player_hp = min(player_max_hp, player_hp + 0.3)
+            if f["type"]=="heal": player_hp=min(player_max_hp,player_hp+0.2)
+            elif f["type"]=="guard": player_immune_timer=max(player_immune_timer,10)
+            elif f["type"]=="sanctuary": player_hp=min(player_max_hp,player_hp+0.5)
+            elif f["type"]=="divine_grace":
+                player_immune_timer=max(player_immune_timer,10)
+                player_hp=min(player_max_hp,player_hp+0.3)
 
         dm = player_stats["damage_mult"]
-        for e in room["enemies"]:
-            is_hit = False
-            dx, dy = e["pos"][0] - f["pos"][0], e["pos"][1] - f["pos"][1]
-            dist = math.hypot(dx, dy)
-            
-            if f["shape"] in ["field", "ball", "spike"]: is_hit = dist <= f["radius"] + e["radius"]
-            elif f["shape"] == "square": is_hit = (abs(dx) <= f["radius"] + e["radius"]) and (abs(dy) <= f["radius"] + e["radius"])
+        for e in living_enemies:
+            dx,dy = e["pos"][0]-f["pos"][0], e["pos"][1]-f["pos"][1]
+            dist = math.hypot(dx,dy)
+            is_hit=False
+            if f["shape"] in ["field","ball","spike"]: is_hit=dist<=f["radius"]+e["radius"]
+            elif f["shape"]=="square": is_hit=(abs(dx)<=f["radius"]+e["radius"]) and (abs(dy)<=f["radius"]+e["radius"])
 
             if is_hit:
-                if f["shape"] == "field": e["speed"] *= 0.5 
-                elif f["shape"] == "spike": e["stun_timer"] = 30
-                elif f["shape"] == "square":
-                    if dist > 0:
-                        e["pos"][0] += (dx/dist) * 8
-                        e["pos"][1] += (dy/dist) * 8
-                
-                if f["type"] in ["sanctuary", "glacial_barricade", "counter_shield"]:
-                    if dist > 0:
-                        knockback = 12 if f["type"] == "counter_shield" else 5
-                        e["pos"][0] += (dx/dist) * knockback
-                        e["pos"][1] += (dy/dist) * knockback
-                
-                if f["type"] == "attack": 
-                    e["hp"] -= 1.5 * dm
-                    if player_items["elemental_blade"] and random.random() < 0.1:
-                        rand_elem = random.choice(["fire", "ice", "poison", "tree"])
-                        if rand_elem == "fire": e["hp"] -= 1.0 * dm
-                        elif rand_elem == "ice": e["speed"] *= 0.3
-                        elif rand_elem == "poison": e["hp"] -= 0.5 * dm
-                        elif rand_elem == "tree": e["stun_timer"] = max(e.get("stun_timer",0), 30)
+                if f["shape"]=="field": e["speed"]*=0.5
+                elif f["shape"]=="spike": e["stun_timer"]=30
+                elif f["shape"]=="square":
+                    if dist>0: e["pos"][0]+=(dx/dist)*8; e["pos"][1]+=(dy/dist)*8
+                if f["type"] in ["sanctuary","glacial_barricade","counter_shield"]:
+                    if dist>0:
+                        kb=12 if f["type"]=="counter_shield" else 5
+                        e["pos"][0]+=(dx/dist)*kb; e["pos"][1]+=(dy/dist)*kb
+                if f["type"]=="attack":
+                    e["hp"]-=1.5*dm
+                    if player_items["elemental_blade"] and random.random()<0.1:
+                        re=random.choice(["fire","ice","poison","tree"])
+                        if re=="fire": e["hp"]-=1.0*dm
+                        elif re=="ice": e["speed"]*=0.3
+                        elif re=="poison": e["hp"]-=0.5*dm
+                        elif re=="tree": e["stun_timer"]=max(e.get("stun_timer",0),30)
+                elif f["type"]=="bomb": e["hp"]-=8*dm
+                elif f["type"]=="explosion": e["hp"]-=8*dm
+                elif f["type"]=="fire": e["hp"]-=0.6*dm
+                elif f["type"]=="poison": e["hp"]-=0.2*dm
+                elif f["type"]=="steam": e["hp"]-=1.0*dm
+                elif f["type"]=="ice": e["speed"]*=0.3
+                elif f["type"]=="tree": e["speed"]=0
+                elif f["type"]=="plague_storm": e["hp"]-=0.5*dm; e["speed"]*=0.1
+                elif f["type"]=="toxic_cloud": e["hp"]-=1.0*dm
+                elif f["type"]=="wildfire": e["hp"]-=2.0*dm
+                elif f["type"]=="glacial_barricade": e["speed"]*=0.1
+                elif f["type"]=="counter_shield": e["hp"]-=4.0*dm
 
-                elif f["type"] == "bomb": e["hp"] -= 8 * dm
-                elif f["type"] == "explosion": e["hp"] -= 8 * dm
-                elif f["type"] == "fire": e["hp"] -= 0.6 * dm
-                elif f["type"] == "poison": e["hp"] -= 0.2 * dm
-                elif f["type"] == "steam": e["hp"] -= 1.0 * dm
-                elif f["type"] == "ice": e["speed"] *= 0.3
-                elif f["type"] == "tree": e["speed"] = 0
-                
-                elif f["type"] == "plague_storm": e["hp"] -= 0.5 * dm; e["speed"] *= 0.1 
-                elif f["type"] == "toxic_cloud": e["hp"] -= 1.0 * dm                    
-                elif f["type"] == "wildfire": e["hp"] -= 2.0 * dm
-                elif f["type"] == "glacial_barricade": e["speed"] *= 0.1
-                elif f["type"] == "counter_shield": e["hp"] -= 4.0 * dm 
+    # ── 총알 업데이트 ──────────────────────────
+    for b in bullets[:]:
+        b["pos"][0] += b["vx"]; b["pos"][1] += b["vy"]
+        b["timer"] -= 1
+        # 방 밖이면 제거
+        if b["timer"] <= 0 or not ROOM_RECT.collidepoint(b["pos"][0], b["pos"][1]):
+            bullets.remove(b); continue
+        # 플레이어 충돌
+        if player_hp > 0 and player_immune_timer <= 0:
+            bd = math.hypot(player_pos[0]-b["pos"][0], player_pos[1]-b["pos"][1])
+            if bd < player_radius + b["radius"]:
+                actual_dmg = b["dmg"] * (1.0-player_stats["defense_up"])
+                player_hp = max(0, player_hp-actual_dmg)
+                player_immune_timer = 60
+                if player_stats["thorns_damage"]>0:
+                    pass  # 총알에 가시 반사는 미구현
+                bullets.remove(b); continue
 
-    room["enemies"] = [e for e in room["enemies"] if e["hp"] > 0]
+    # ── 적 AI 업데이트 ─────────────────────────
+    for e in room["enemies"]:
+        update_enemy(e, player_pos, player_hp, living_enemies, active_fields, player_stats["damage_mult"])
 
-    for i, e in enumerate(room["enemies"]):
-        dx, dy = player_pos[0] - e["pos"][0], player_pos[1] - e["pos"][1]
-        dist = math.hypot(dx, dy)
-        
-        if e.get("stun_timer", 0) > 0:
-            e["stun_timer"] -= 1
-            move_x, move_y = 0, 0
-        elif dist > 0 and player_hp > 0:
-            move_x = (dx/dist) * e["speed"]
-            move_y = (dy/dist) * e["speed"]
-        else:
-            move_x, move_y = 0, 0
-            
-        e["pos"][0] += move_x
-        for f in active_fields:
-            if f["shape"] == "square" and abs(e["pos"][0] - f["pos"][0]) < f["radius"] + e["radius"] and abs(e["pos"][1] - f["pos"][1]) < f["radius"] + e["radius"]:
-                e["pos"][0] -= move_x 
-                break
-        
-        e["pos"][1] += move_y
-        for f in active_fields:
-            if f["shape"] == "square" and abs(e["pos"][0] - f["pos"][0]) < f["radius"] + e["radius"] and abs(e["pos"][1] - f["pos"][1]) < f["radius"] + e["radius"]:
-                e["pos"][1] -= move_y 
-                break
+    # 사망 애니메이션 완료된 적 제거
+    room["enemies"] = [e for e in room["enemies"] if not (e["dead"] and e["anim_frame"] >= 3)]
 
-        for j in range(i + 1, len(room["enemies"])):
-            other_e = room["enemies"][j]
-            ex, ey = e["pos"][0] - other_e["pos"][0], e["pos"][1] - other_e["pos"][1]
-            e_dist = math.hypot(ex, ey)
-            e_min_dist = e["radius"] + other_e["radius"]
-            if e_dist < e_min_dist and e_dist > 0:
-                e_overlap = e_min_dist - e_dist
-                e["pos"][0] += (ex / e_dist) * (e_overlap / 2)
-                e["pos"][1] += (ey / e_dist) * (e_overlap / 2)
-                other_e["pos"][0] -= (ex / e_dist) * (e_overlap / 2)
-                other_e["pos"][1] -= (ey / e_dist) * (e_overlap / 2)
+    # ── 적 충돌 / 플레이어 데미지 ──────────────
+    for i, e in enumerate(living_enemies):
+        # 적끼리 분리
+        for j in range(i+1, len(living_enemies)):
+            oe = living_enemies[j]
+            ex,ey = e["pos"][0]-oe["pos"][0], e["pos"][1]-oe["pos"][1]
+            ed = math.hypot(ex,ey)
+            emd = e["radius"]+oe["radius"]
+            if ed<emd and ed>0:
+                ov = emd-ed
+                e["pos"][0]+=(ex/ed)*(ov/2); e["pos"][1]+=(ey/ed)*(ov/2)
+                oe["pos"][0]-=(ex/ed)*(ov/2); oe["pos"][1]-=(ey/ed)*(ov/2)
 
-        p_dx, p_dy = player_pos[0] - e["pos"][0], player_pos[1] - e["pos"][1]
-        p_dist = math.hypot(p_dx, p_dy)
-        min_dist = player_radius + e["radius"]
-        if p_dist < min_dist and p_dist > 0:
-            player_pos[0] += (p_dx / p_dist) * (min_dist - p_dist)
-            player_pos[1] += (p_dy / p_dist) * (min_dist - p_dist)
-            if player_immune_timer <= 0 and player_hp > 0:
-                base_dmg = 25 if e["type"] == "boss" else 10
-                actual_dmg = base_dmg * (1.0 - player_stats["defense_up"])
-                player_hp = max(0, player_hp - actual_dmg)
-                player_immune_timer = 60 
-                
-                if player_stats["thorns_damage"] > 0:
+        # 플레이어 접촉 데미지
+        pdx,pdy = player_pos[0]-e["pos"][0], player_pos[1]-e["pos"][1]
+        pd = math.hypot(pdx,pdy)
+        md = player_radius+e["radius"]
+        if pd<md and pd>0:
+            player_pos[0]+=(pdx/pd)*(md-pd); player_pos[1]+=(pdy/pd)*(md-pd)
+            if player_immune_timer<=0 and player_hp>0:
+                base_dmg = 25 if e["type"]=="boss" else 10
+                actual_dmg = base_dmg*(1.0-player_stats["defense_up"])
+                player_hp = max(0, player_hp-actual_dmg)
+                player_immune_timer = 60
+                if player_stats["thorns_damage"]>0:
                     e["hp"] -= player_stats["thorns_damage"]
 
-    if not room["cleared"] and len(room["enemies"]) == 0 and current_coords != (0,0):
+    # ── 방 클리어 / 보상 ──────────────────────
+    if not room["cleared"] and room_cleared and current_coords!=(0,0):
         room["cleared"] = True
-        all_elements = ["fire", "poison", "ice", "bomb", "tree", "guard", "heal"]
-        all_shapes = ["ball", "square", "spike"]
-        
-        available_words = [w for w in all_elements if w not in player_words]
-        available_shapes = [s for s in all_shapes if s not in player_shapes]
-        available_non_stack = [item for item in NON_STACKABLE_ITEMS if not player_items.get(item["id"], False)]
-        
-        reward_pool = []
-        if available_words: reward_pool.extend(["word"] * 2) 
-        if available_shapes: reward_pool.extend(["shape"] * 2) 
-        reward_pool.extend(["stackable_item"] * 4) 
-        if available_non_stack: reward_pool.extend(["non_stackable_item"] * 2)
-        
-        if reward_pool:
-            r_type = random.choice(reward_pool)
-            r_val = None
-            if r_type == "word": r_val = random.choice(available_words)
-            elif r_type == "shape": r_val = random.choice(available_shapes)
-            elif r_type == "stackable_item": r_val = random.choice(STACKABLE_ITEMS)
-            elif r_type == "non_stackable_item": r_val = random.choice(available_non_stack)
-            
-            room["reward"] = {"data": {"type": r_type, "value": r_val}, "pos": [WIDTH//2, ROOM_RECT.centery]}
+        all_elements=["fire","poison","ice","bomb","tree","guard","heal"]
+        all_shapes=["ball","square","spike"]
+        av_words=[w for w in all_elements if w not in player_words]
+        av_shapes=[s for s in all_shapes if s not in player_shapes]
+        av_ns=[item for item in NON_STACKABLE_ITEMS if not player_items.get(item["id"],False)]
+        pool=[]
+        if av_words: pool.extend(["word"]*2)
+        if av_shapes: pool.extend(["shape"]*2)
+        pool.extend(["stackable_item"]*4)
+        if av_ns: pool.extend(["non_stackable_item"]*2)
+        if pool:
+            r_type=random.choice(pool); r_val=None
+            if r_type=="word": r_val=random.choice(av_words)
+            elif r_type=="shape": r_val=random.choice(av_shapes)
+            elif r_type=="stackable_item": r_val=random.choice(STACKABLE_ITEMS)
+            elif r_type=="non_stackable_item": r_val=random.choice(av_ns)
+            room["reward"]={"data":{"type":r_type,"value":r_val},"pos":[WIDTH//2,ROOM_RECT.centery]}
 
     if room.get("reward"):
-        dist = math.hypot(room["reward"]["pos"][0] - player_pos[0], room["reward"]["pos"][1] - player_pos[1])
-        if dist < 40:
-            reward_data = room["reward"]["data"]
-            r_type = reward_data["type"]
-            r_val = reward_data["value"]
-            
-            if r_type == "word":
-                player_words.append(r_val)
-                message = f"단어 획득: '{r_val}'!"
-            elif r_type == "shape":
-                player_shapes.append(r_val)
-                message = f"형태 획득: '{r_val}'!"
-            elif r_type in ["stackable_item", "non_stackable_item"]:
-                item_id = r_val["id"]
-                item_name = r_val["name"]
-                
-                if item_id == "duration_up": player_stats["skill_duration_mult"] += 0.3
-                elif item_id == "radius_up": player_stats["radius_mult"] += 0.25
-                elif item_id == "damage_up": player_stats["damage_mult"] += 0.3
-                elif item_id == "speed_up": player_stats["speed_mult"] += 0.15
-                elif item_id == "thorns": player_stats["thorns_damage"] += 10
-                elif item_id == "hp_up": 
-                    player_max_hp += 30; player_hp += 30
-                elif item_id == "defense_up": player_stats["defense_up"] = min(0.7, player_stats["defense_up"] + 0.15)
-                elif item_id in ["pet", "elemental_blade", "map_reveal"]:
-                    player_items[item_id] = True
-                
-                message = f"아이템 획득: {item_name}!"
-                
-            message_timer = 150
-            room["reward"] = None
+        rd=room["reward"]
+        dist=math.hypot(rd["pos"][0]-player_pos[0], rd["pos"][1]-player_pos[1])
+        if dist<40:
+            rv=rd["data"]["value"]; rt=rd["data"]["type"]
+            if rt=="word": player_words.append(rv); message=f"단어 획득: '{rv}'!"
+            elif rt=="shape": player_shapes.append(rv); message=f"형태 획득: '{rv}'!"
+            elif rt in ["stackable_item","non_stackable_item"]:
+                iid=rv["id"]; iname=rv["name"]
+                if iid=="duration_up": player_stats["skill_duration_mult"]+=0.3
+                elif iid=="radius_up": player_stats["radius_mult"]+=0.25
+                elif iid=="damage_up": player_stats["damage_mult"]+=0.3
+                elif iid=="speed_up": player_stats["speed_mult"]+=0.15
+                elif iid=="thorns": player_stats["thorns_damage"]+=10
+                elif iid=="hp_up": player_max_hp+=30; player_hp+=30
+                elif iid=="defense_up": player_stats["defense_up"]=min(0.7,player_stats["defense_up"]+0.15)
+                elif iid in ["pet","elemental_blade","map_reveal"]: player_items[iid]=True
+                message=f"아이템 획득: {iname}!"
+            message_timer=150; room["reward"]=None
 
-    pygame.draw.rect(screen, WALL_COLOR, (0, 0, WIDTH, HEIGHT - 100))
+    # ──────────────────────────────────────────
+    # 렌더링
+    # ──────────────────────────────────────────
+    pygame.draw.rect(screen, WALL_COLOR, (0,0,WIDTH,HEIGHT-100))
     pygame.draw.rect(screen, FLOOR_COLOR, ROOM_RECT)
 
     door_color = DOOR_OPEN if room_cleared else DOOR_LOCKED
     door_thick = 15
-    for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
-        neighbor = (current_coords[0] + dx, current_coords[1] + dy)
-        if neighbor in world_map:
-            if (dx, dy) == (0, -1): pygame.draw.rect(screen, door_color, (WIDTH//2 - door_w//2, ROOM_RECT.top - door_thick, door_w, door_thick + 5))
-            elif (dx, dy) == (0, 1): pygame.draw.rect(screen, door_color, (WIDTH//2 - door_w//2, ROOM_RECT.bottom - 5, door_w, door_thick + 5))
-            elif (dx, dy) == (-1, 0): pygame.draw.rect(screen, door_color, (ROOM_RECT.left - door_thick, ROOM_RECT.centery - door_w//2, door_thick + 5, door_w))
-            elif (dx, dy) == (1, 0): pygame.draw.rect(screen, door_color, (ROOM_RECT.right - 5, ROOM_RECT.centery - door_w//2, door_thick + 5, door_w))
+    for dx,dy in [(0,-1),(0,1),(-1,0),(1,0)]:
+        nb=(current_coords[0]+dx,current_coords[1]+dy)
+        if nb in world_map:
+            if (dx,dy)==(0,-1): pygame.draw.rect(screen,door_color,(WIDTH//2-door_w//2,ROOM_RECT.top-door_thick,door_w,door_thick+5))
+            elif (dx,dy)==(0,1): pygame.draw.rect(screen,door_color,(WIDTH//2-door_w//2,ROOM_RECT.bottom-5,door_w,door_thick+5))
+            elif (dx,dy)==(-1,0): pygame.draw.rect(screen,door_color,(ROOM_RECT.left-door_thick,ROOM_RECT.centery-door_w//2,door_thick+5,door_w))
+            elif (dx,dy)==(1,0): pygame.draw.rect(screen,door_color,(ROOM_RECT.right-5,ROOM_RECT.centery-door_w//2,door_thick+5,door_w))
 
+    # 필드 렌더
     if active_fields:
-        field_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        fs=pygame.Surface((WIDTH,HEIGHT),pygame.SRCALPHA)
         for f in active_fields:
-            color = FIELD_COLORS.get(f["type"], (255, 255, 255, 100))
-            if f["type"] in ["explosion", "bomb", "wildfire", "counter_shield"]:
-                fade = max(0, int(255 * (f["timer"] / f["max_timer"])))
-                color = (color[0], color[1], color[2], fade)
-            
-            if f["shape"] == "ball" or f["shape"] == "field":
-                pygame.draw.circle(field_surface, color, (int(f["pos"][0]), int(f["pos"][1])), f["radius"])
-            elif f["shape"] == "square":
-                rect = pygame.Rect(f["pos"][0] - f["radius"], f["pos"][1] - f["radius"], f["radius"]*2, f["radius"]*2)
-                pygame.draw.rect(field_surface, color, rect)
-                pygame.draw.rect(field_surface, (255,255,255,100), rect, 2) 
-            elif f["shape"] == "spike":
-                points = []
-                for i in range(8):
-                    r = f["radius"] if i % 2 == 0 else f["radius"] * 0.4
-                    ang = math.radians(i * 45)
-                    points.append((f["pos"][0] + math.cos(ang)*r, f["pos"][1] + math.sin(ang)*r))
-                pygame.draw.polygon(field_surface, color, points)
-        screen.blit(field_surface, (0, 0))
+            color=FIELD_COLORS.get(f["type"],(255,255,255,100))
+            if f["type"] in ["explosion","bomb","wildfire","counter_shield"]:
+                fade=max(0,int(255*(f["timer"]/f["max_timer"])))
+                color=(color[0],color[1],color[2],fade)
+            if f["shape"] in ["ball","field"]:
+                pygame.draw.circle(fs,color,(int(f["pos"][0]),int(f["pos"][1])),f["radius"])
+            elif f["shape"]=="square":
+                rect=pygame.Rect(f["pos"][0]-f["radius"],f["pos"][1]-f["radius"],f["radius"]*2,f["radius"]*2)
+                pygame.draw.rect(fs,color,rect); pygame.draw.rect(fs,(255,255,255,100),rect,2)
+            elif f["shape"]=="spike":
+                pts=[]
+                for k in range(8):
+                    r=f["radius"] if k%2==0 else f["radius"]*0.4
+                    ang=math.radians(k*45)
+                    pts.append((f["pos"][0]+math.cos(ang)*r,f["pos"][1]+math.sin(ang)*r))
+                pygame.draw.polygon(fs,color,pts)
+        screen.blit(fs,(0,0))
 
-    if player_items["pet"] and player_hp > 0:
-        pygame.draw.circle(screen, (255, 150, 200), (int(pet_pos[0]), int(pet_pos[1])), 10)
-        pygame.draw.circle(screen, WHITE, (int(pet_pos[0]), int(pet_pos[1])), 10, 2)
+    # 총알 렌더
+    for b in bullets:
+        pygame.draw.circle(screen, b["color"], (int(b["pos"][0]),int(b["pos"][1])), b["radius"])
+        pygame.draw.circle(screen, WHITE, (int(b["pos"][0]),int(b["pos"][1])), b["radius"], 1)
 
+    # 펫
+    if player_items["pet"] and player_hp>0:
+        pygame.draw.circle(screen,(255,150,200),(int(pet_pos[0]),int(pet_pos[1])),10)
+        pygame.draw.circle(screen,WHITE,(int(pet_pos[0]),int(pet_pos[1])),10,2)
+
+    # 적 렌더
     for e in room["enemies"]:
-        color = BOSS_COLOR if e["type"] == "boss" else ENEMY_COLOR
-        pygame.draw.circle(screen, color, (int(e["pos"][0]), int(e["pos"][1])), e["radius"])
-        if e.get("stun_timer", 0) > 0:
-            pygame.draw.circle(screen, WHITE, (int(e["pos"][0]), int(e["pos"][1])), e["radius"] + 4, 2)
-            
-        bar_w = e["radius"] * 3
-        bar_x, bar_y = e["pos"][0] - (bar_w / 2), e["pos"][1] - e["radius"] - 15
-        pygame.draw.rect(screen, HP_RED, (bar_x, bar_y, bar_w, 8))
-        pygame.draw.rect(screen, HP_GREEN, (bar_x, bar_y, int(bar_w * max(0, e["hp"] / e["max_hp"])), 8))
+        draw_enemy(screen, e)
 
+    # 보상
     if room.get("reward"):
-        rw_data = room["reward"]["data"]
-        r_type = rw_data["type"]
-        r_val = rw_data["value"]
-        
-        if r_type in ["word", "shape"]:
-            disp_text = f"[{r_val}]"
-            color = (255, 255, 0)
+        rv=room["reward"]["data"]["value"]; rt=room["reward"]["data"]["type"]
+        if rt in ["word","shape"]:
+            dtxt=f"[{rv}]"; dc=(255,255,0)
         else:
-            disp_text = f"[{r_val['name']}]" 
-            color = (0, 255, 255) if r_type == "stackable_item" else (255, 100, 255)
-            
-        rw_text = font.render(disp_text, True, color)
-        screen.blit(rw_text, (room["reward"]["pos"][0] - rw_text.get_width()//2, room["reward"]["pos"][1] - 15))
+            dtxt=f"[{rv['name']}]"; dc=(0,255,255) if rt=="stackable_item" else (255,100,255)
+        rw=font.render(dtxt,True,dc)
+        screen.blit(rw,(room["reward"]["pos"][0]-rw.get_width()//2,room["reward"]["pos"][1]-15))
 
-    if player_hp > 0:
-        if player_immune_timer > 0:
-            pygame.draw.circle(screen, PLAYER_IMMUNE, (int(player_pos[0]), int(player_pos[1])), player_radius)
-            pygame.draw.circle(screen, WHITE, (int(player_pos[0]), int(player_pos[1])), player_radius + 2, 2)
-        else:
-            pygame.draw.circle(screen, PLAYER_COLOR, (int(player_pos[0]), int(player_pos[1])), player_radius)
+    # 플레이어
+    if player_hp>0:
+        pc=PLAYER_IMMUNE if player_immune_timer>0 else PLAYER_COLOR
+        pygame.draw.circle(screen,pc,(int(player_pos[0]),int(player_pos[1])),player_radius)
+        if player_immune_timer>0:
+            pygame.draw.circle(screen,WHITE,(int(player_pos[0]),int(player_pos[1])),player_radius+2,2)
 
-    if attack_timer > 0 and 'attack_data' in locals():
-        points = [(player_pos[0], player_pos[1])]
-        start_angle = attack_data["angle"] - attack_data["half_cone"]
-        end_angle = attack_data["angle"] + attack_data["half_cone"]
-        steps = 10
-        for i in range(steps + 1):
-            theta = start_angle + (end_angle - start_angle) * (i / steps)
-            px = player_pos[0] + math.cos(theta) * attack_data["radius"]
-            py = player_pos[1] + math.sin(theta) * attack_data["radius"]
-            points.append((px, py))
-        pygame.draw.polygon(screen, WHITE, points, 3)
-        attack_timer -= 1
+    # 근접 공격 이펙트
+    if attack_timer>0:
+        pts=[(player_pos[0],player_pos[1])]
+        sa=attack_data["angle"]-attack_data["half_cone"]
+        ea=attack_data["angle"]+attack_data["half_cone"]
+        for k in range(11):
+            theta=sa+(ea-sa)*(k/10)
+            pts.append((player_pos[0]+math.cos(theta)*attack_data["radius"],
+                        player_pos[1]+math.sin(theta)*attack_data["radius"]))
+        pygame.draw.polygon(screen,WHITE,pts,3)
+        attack_timer-=1
 
-    MM_X, MM_Y, CELL, GAP = WIDTH - 100, 80, 15, 3
-    for coords, info in world_map.items():
+    # 미니맵
+    MMX,MMY,CELL,GAP=WIDTH-100,80,15,3
+    for coords,info in world_map.items():
         if is_discovered(coords):
-            draw_x, draw_y = MM_X + (coords[0] - current_coords[0]) * (CELL + GAP) - CELL // 2, MM_Y + (coords[1] - current_coords[1]) * (CELL + GAP) - CELL // 2
-            color = MM_CURRENT if coords == current_coords else (MM_BOSS if info["type"] == "boss" else (MM_VISITED if info["visited"] else MM_DISCOVERED))
-            pygame.draw.rect(screen, color, (draw_x, draw_y, CELL, CELL))
-            pygame.draw.rect(screen, WHITE, (draw_x, draw_y, CELL, CELL), 1)
+            dx2=MMX+(coords[0]-current_coords[0])*(CELL+GAP)-CELL//2
+            dy2=MMY+(coords[1]-current_coords[1])*(CELL+GAP)-CELL//2
+            c=MM_CURRENT if coords==current_coords else (MM_BOSS if info["type"]=="boss" else (MM_VISITED if info["visited"] else MM_DISCOVERED))
+            pygame.draw.rect(screen,c,(dx2,dy2,CELL,CELL))
+            pygame.draw.rect(screen,WHITE,(dx2,dy2,CELL,CELL),1)
 
-    # 기본 UI 레이아웃
-    pygame.draw.rect(screen, UI_BG, (15, 15, 260, 35))
-    pygame.draw.rect(screen, WHITE, (15, 15, 260, 35), 2)
-    screen.blit(font.render(f"PLAYER HP: {int(player_hp)}/{player_max_hp}", True, WHITE if player_hp > 25 else HP_RED), (30, 22))
+    # HP 바
+    pygame.draw.rect(screen,UI_BG,(15,15,260,35))
+    pygame.draw.rect(screen,WHITE,(15,15,260,35),2)
+    screen.blit(font.render(f"PLAYER HP: {int(player_hp)}/{player_max_hp}",True,WHITE if player_hp>25 else HP_RED),(30,22))
 
-    if message_timer > 0:
-        msg_surf = font.render(message, True, (255, 230, 100))
-        screen.blit(msg_surf, (WIDTH - msg_surf.get_width() - 20, 20))
-        message_timer -= 1
+    # 메시지
+    if message_timer>0:
+        ms=font.render(message,True,(255,230,100))
+        screen.blit(ms,(WIDTH-ms.get_width()-20,20)); message_timer-=1
 
-    ui_rect = pygame.Rect(0, HEIGHT - 100, WIDTH, 100)
-    pygame.draw.rect(screen, UI_BG, ui_rect)
-    pygame.draw.line(screen, WHITE, (0, HEIGHT - 100), (WIDTH, HEIGHT - 100), 2)
-    
-    screen.blit(font.render(f"Words: {', '.join(player_words)}", True, (150, 200, 255)), (20, HEIGHT - 92))
-    screen.blit(font.render(f"Shapes: {', '.join(player_shapes)}", True, (200, 255, 150)), (20, HEIGHT - 72))
-    
-    pygame.draw.rect(screen, BLACK, (20, HEIGHT - 45, WIDTH - 40, 35))
-    pygame.draw.rect(screen, WHITE, (20, HEIGHT - 45, WIDTH - 40, 35), 2)
-    screen.blit(big_font.render(input_text + "_", True, WHITE), (30, HEIGHT - 42))
+    # 하단 UI
+    ui_rect=pygame.Rect(0,HEIGHT-100,WIDTH,100)
+    pygame.draw.rect(screen,UI_BG,ui_rect)
+    pygame.draw.line(screen,WHITE,(0,HEIGHT-100),(WIDTH,HEIGHT-100),2)
+    screen.blit(font.render(f"Words: {', '.join(player_words)}",True,(150,200,255)),(20,HEIGHT-92))
+    screen.blit(font.render(f"Shapes: {', '.join(player_shapes)}",True,(200,255,150)),(20,HEIGHT-72))
+    pygame.draw.rect(screen,BLACK,(20,HEIGHT-45,WIDTH-40,35))
+    pygame.draw.rect(screen,WHITE,(20,HEIGHT-45,WIDTH-40,35),2)
+    screen.blit(big_font.render(input_text+"_",True,WHITE),(30,HEIGHT-42))
 
     pygame.display.flip()
     clock.tick(60)
