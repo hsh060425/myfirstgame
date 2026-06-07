@@ -52,7 +52,14 @@ def load_sprite(rel_path, scale=None):
     try:
         img = pygame.image.load(full).convert_alpha()
         if scale:
-            img = pygame.transform.scale(img, scale)
+            # 원본 가로세로 비율을 유지하면서 정사각형 캔버스 중앙에 정렬하여 회전 시 찌그러짐 방지
+            orig_w, orig_h = img.get_size()
+            max_size = max(orig_w, orig_h)
+            square_img = pygame.Surface((max_size, max_size), pygame.SRCALPHA)
+            x_offset = (max_size - orig_w) // 2
+            y_offset = (max_size - orig_h) // 2
+            square_img.blit(img, (x_offset, y_offset))
+            img = pygame.transform.scale(square_img, scale)
         return img
     except Exception:
         return None
@@ -66,7 +73,14 @@ def load_strip(rel_path, frame_w, frame_h, count, scale=None):
         for i in range(count):
             frame = sheet.subsurface(pygame.Rect(i * frame_w, 0, frame_w, frame_h))
             if scale:
-                frame = pygame.transform.scale(frame, scale)
+                # 원본 가로세로 비율을 유지하면서 정사각형 캔버스 중앙에 정렬하여 회전 시 찌그러짐 방지
+                orig_w, orig_h = frame.get_size()
+                max_size = max(orig_w, orig_h)
+                square_frame = pygame.Surface((max_size, max_size), pygame.SRCALPHA)
+                x_offset = (max_size - orig_w) // 2
+                y_offset = (max_size - orig_h) // 2
+                square_frame.blit(frame, (x_offset, y_offset))
+                frame = pygame.transform.scale(square_frame, scale)
             frames.append(frame)
         return frames
     except Exception:
@@ -77,29 +91,11 @@ def load_strip(rel_path, frame_w, frame_h, count, scale=None):
 # 각 적마다 상태별 프레임 리스트를 담은 딕셔너리.
 # 이미지가 없으면 빈 리스트 → 폴백 원형 렌더링.
 # ──────────────────────────────────────────────
-#
-# 기대 파일 구조 예시 (sprites/ 폴더 기준):
-#   sprites/red_slime/idle.png      (프레임 3장 가로 스트립, 각 24×24)
-#   sprites/red_slime/hit.png       (프레임 3장)
-#   sprites/red_slime/death.png     (프레임 4장)
-#   sprites/yellow_eye/idle.png
-#   sprites/yellow_eye/move.png     (8방향 × n프레임 스트립, 방향 순서: 위/우상/우/우하/아래/좌하/좌/좌상)
-#   sprites/yellow_eye/shoot.png
-#   sprites/yellow_eye/hit.png
-#   sprites/yellow_eye/death.png
-#   sprites/stone_guardian/idle.png
-#   sprites/stone_guardian/charge.png
-#   sprites/stone_guardian/hit.png
-#   sprites/stone_guardian/death.png
-#   sprites/shadow_bat/idle.png
-#   sprites/shadow_bat/move.png
-#   sprites/shadow_bat/hit.png
-#   sprites/shadow_bat/death.png
-#
+
 # 없는 파일은 그냥 건너뜁니다.
 
 FRAME_SIZE = (48, 48)   # 렌더 크기 (픽셀 아트라면 자유 변경)
-FW, FH = 100, 100         # 스프라이트 시트 내 원본 프레임 크기
+FW, FH = 80, 80         # 스프라이트 시트 내 원본 프레임 크기
 
 ENEMY_SPRITES = {
     "red_slime": [load_sprite("red_slime.png", FRAME_SIZE)],
@@ -146,7 +142,7 @@ def make_enemy(etype, pos):
         "stone_guardian": {"hp": 40, "max_hp": 40, "speed": 0.6, "base_speed": 0.6, "radius": 18,
                            "charge_timer": 0, "charge_cooldown": 180},
         "shadow_bat":     {"hp": 10, "max_hp": 10, "speed": 2.2, "base_speed": 2.2, "radius": 12,
-                           "orbit_angle": random.uniform(0, math.pi*2)},
+                           "orbit_angle": random.uniform(0, math.pi*2), "action_timer": random.randint(120, 180)},
         "boss":           {"hp": 300, "max_hp": 300, "speed": 1.5, "base_speed": 1.5, "radius": 35},
     }
     base.update(presets.get(etype, {}))
@@ -258,14 +254,14 @@ def update_enemy(e, player_pos, player_hp, room_enemies, active_fields, dm):
 
     # ── 스톤 가디언: 돌진 후 잠시 멈춤 ───────────
     elif etype == "stone_guardian":
-        CHARGE_RANGE = 300
+        CHARGE_RANGE = 1200
         dx, dy = player_pos[0]-e["pos"][0], player_pos[1]-e["pos"][1]
         dist = math.hypot(dx, dy)
 
         if e.get("charge_timer", 0) > 0:
-            # 돌진 중
-            e["pos"][0] += e["charge_dir"][0] * e["speed"] * 4
-            e["pos"][1] += e["charge_dir"][1] * e["speed"] * 4
+            # 돌진 중 (이전보다 더 빠르고 멀리 이동)
+            e["pos"][0] += e["charge_dir"][0] * e["speed"] * 15
+            e["pos"][1] += e["charge_dir"][1] * e["speed"] * 15
             e["charge_timer"] -= 1
             set_state(e, "charge")
             if e["charge_timer"] == 0:
@@ -277,28 +273,51 @@ def update_enemy(e, player_pos, player_hp, room_enemies, active_fields, dm):
                 # 돌진 시작
                 if dist > 0:
                     e["charge_dir"] = [dx/dist, dy/dist]
-                e["charge_timer"] = 25
+                e["charge_timer"] = 30
                 e["action_timer"] = e.get("charge_cooldown", 180)
                 e["facing_x"] = 1 if dx >= 0 else -1
             else:
                 set_state(e, "idle")
         advance_anim(e)
 
-    # ── 새도우 박쥐: 플레이어 주변 원형 비행 ──────
+    # ── 새도우 박쥐: 플레이어 주변 원형 비행 및 주기적인 돌진 공격 ──────
     elif etype == "shadow_bat":
-        e["orbit_angle"] = e.get("orbit_angle", 0) + 0.04
-        ORBIT_R = 130
-        target_x = player_pos[0] + math.cos(e["orbit_angle"]) * ORBIT_R
-        target_y = player_pos[1] + math.sin(e["orbit_angle"]) * ORBIT_R
-        tdx = target_x - e["pos"][0]
-        tdy = target_y - e["pos"][1]
-        tdist = math.hypot(tdx, tdy)
-        if tdist > 0 and player_hp > 0:
-            spd = min(e["speed"] * 2, tdist)
-            e["pos"][0] += (tdx/tdist)*spd
-            e["pos"][1] += (tdy/tdist)*spd
-            e["facing_x"] = 1 if tdx >= 0 else -1
-        set_state(e, "move")
+        if e.get("charge_timer", 0) > 0:
+            # 돌진 중 (플레이어를 향해 빠른 속도로 공격)
+            e["pos"][0] += e["charge_dir"][0] * e["speed"] * 3
+            e["pos"][1] += e["charge_dir"][1] * e["speed"] * 3
+            e["charge_timer"] -= 1
+            e["facing_x"] = 1 if e["charge_dir"][0] >= 0 else -1
+            set_state(e, "charge")
+        else:
+            e["action_timer"] = e.get("action_timer", 0) - 1
+            if e["action_timer"] <= 0 and player_hp > 0:
+                # 돌진 공격 개시
+                dx, dy = player_pos[0] - e["pos"][0], player_pos[1] - e["pos"][1]
+                dist = math.hypot(dx, dy)
+                if dist > 0:
+                    e["charge_dir"] = [dx/dist, dy/dist]
+                else:
+                    e["charge_dir"] = [1, 0]
+                e["charge_timer"] = 30  # 돌진 지속시간 (프레임)
+                e["action_timer"] = random.randint(150, 240)  # 다음 공격 쿨타임
+                e["facing_x"] = 1 if dx >= 0 else -1
+                set_state(e, "charge")
+            else:
+                # 일반 원형 비행
+                e["orbit_angle"] = e.get("orbit_angle", 0) + 0.04
+                ORBIT_R = 130
+                target_x = player_pos[0] + math.cos(e["orbit_angle"]) * ORBIT_R
+                target_y = player_pos[1] + math.sin(e["orbit_angle"]) * ORBIT_R
+                tdx = target_x - e["pos"][0]
+                tdy = target_y - e["pos"][1]
+                tdist = math.hypot(tdx, tdy)
+                if tdist > 0 and player_hp > 0:
+                    spd = min(e["speed"] * 2, tdist)
+                    e["pos"][0] += (tdx/tdist)*spd
+                    e["pos"][1] += (tdy/tdist)*spd
+                    e["facing_x"] = 1 if tdx >= 0 else -1
+                set_state(e, "move")
         advance_anim(e)
 
     # ── 보스: 기본 추적 (추후 확장) ─────────────
@@ -319,6 +338,7 @@ def draw_enemy(surface, e):
     px, py = int(e["pos"][0]), int(e["pos"][1])
     frame = get_frame(e)
     if frame:
+        # 정사각형 캔버스로 정렬했으므로 회전을 적용해도 이미지 찌그러짐이 최소화됩니다.
         dx = player_pos[0] - px
         dy = player_pos[1] - py
         angle = math.degrees(math.atan2(-dy, dx))
