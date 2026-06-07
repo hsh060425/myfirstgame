@@ -103,6 +103,43 @@ ENEMY_SPRITES = {
     "stone_guardian": [load_sprite("stone_guard.png", FRAME_SIZE)],
     "shadow_bat": [load_sprite("shadow_bat.png", FRAME_SIZE)],
 }
+PLAYER_SPRITE = load_sprite("player.png", (48, 48)) 
+
+# ──────────────────────────────────────────────
+# 플레이어 파티클 및 애니메이션 이펙트 시스템
+# ──────────────────────────────────────────────
+player_particles = []
+
+def spawn_player_particles(pos, color, count=1, speed=2.0, size_range=(2, 5)):
+    for _ in range(count):
+        angle = random.uniform(0, 2 * math.pi)
+        spd = random.uniform(0.5, speed)
+        vx = math.cos(angle) * spd
+        vy = math.sin(angle) * spd
+        player_particles.append({
+            "pos": list(pos),
+            "vel": [vx, vy],
+            "color": color,
+            "radius": random.uniform(*size_range),
+            "alpha": 255,
+            "decay": random.uniform(4, 8)
+        })
+
+def update_and_draw_particles(surface):
+    for p in player_particles[:]:
+        p["pos"][0] += p["vel"][0]
+        p["pos"][1] += p["vel"][1]
+        p["alpha"] -= p["decay"]
+        if p["alpha"] <= 0:
+            player_particles.remove(p)
+            continue
+        
+        size = int(p["radius"] * 2)
+        if size < 1:
+            size = 1
+        psurf = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(psurf, (*p["color"], int(p["alpha"])), (size // 2, size // 2), p["radius"])
+        surface.blit(psurf, (int(p["pos"][0] - size // 2), int(p["pos"][1] - size // 2)))
 
 # 폴백 색상 (스프라이트 없을 때)
 ENEMY_FALLBACK_COLORS = {
@@ -500,6 +537,7 @@ def is_discovered(coords):
 # 메인 루프
 # ──────────────────────────────────────────────
 running = True
+player_prev_hp = player_hp
 while running:
     screen.fill(BLACK)
     room = world_map[current_coords]
@@ -596,10 +634,15 @@ while running:
         ps = player_speed * player_stats["speed_mult"]
         keys = pygame.key.get_pressed()
         nx, ny = player_pos[0], player_pos[1]
-        if keys[pygame.K_LEFT]:  nx -= ps; player_facing = [-1,0]
-        if keys[pygame.K_RIGHT]: nx += ps; player_facing = [1,0]
-        if keys[pygame.K_UP]:    ny -= ps; player_facing = [0,-1]
-        if keys[pygame.K_DOWN]:  ny += ps; player_facing = [0,1]
+        moving = False
+        if keys[pygame.K_LEFT]:  nx -= ps; player_facing = [-1,0]; moving = True
+        if keys[pygame.K_RIGHT]: nx += ps; player_facing = [1,0]; moving = True
+        if keys[pygame.K_UP]:    ny -= ps; player_facing = [0,-1]; moving = True
+        if keys[pygame.K_DOWN]:  ny += ps; player_facing = [0,1]; moving = True
+        if moving:
+            # 이동 (8방향): 플레이어 꼬리 부분에서 파란 먼지 잔상 파티클 생성
+            trail_pos = [player_pos[0] - player_facing[0] * 12, player_pos[1] - player_facing[1] * 12]
+            spawn_player_particles(trail_pos, (100, 180, 255), count=1, speed=1.0, size_range=(2, 4))
     else:
         nx, ny = player_pos[0], player_pos[1]
 
@@ -892,12 +935,40 @@ while running:
         rw=font.render(dtxt,True,dc)
         screen.blit(rw,(room["reward"]["pos"][0]-rw.get_width()//2,room["reward"]["pos"][1]-15))
 
+    # 플레이어 파티클 렌더
+    update_and_draw_particles(screen)
+
     # 플레이어
-    if player_hp>0:
-        pc=PLAYER_IMMUNE if player_immune_timer>0 else PLAYER_COLOR
-        pygame.draw.circle(screen,pc,(int(player_pos[0]),int(player_pos[1])),player_radius)
-        if player_immune_timer>0:
-            pygame.draw.circle(screen,WHITE,(int(player_pos[0]),int(player_pos[1])),player_radius+2,2)
+    if player_hp > 0:
+        if PLAYER_SPRITE:
+            # 기본 상태 (Idle): 미세한 크기 맥동(호흡) 효과
+            pulse = 1.0 + 0.05 * math.sin(pygame.time.get_ticks() * 0.005)
+            
+            # 이동 및 Idle: 주변 4개 입자가 공전하듯 돌게 만드는 부드러운 스핀 효과
+            spin_angle = (pygame.time.get_ticks() * 0.05) % 360
+            rotated_sprite = pygame.transform.rotate(PLAYER_SPRITE, spin_angle)
+            
+            # 크기 맥동 적용
+            w, h = rotated_sprite.get_size()
+            scaled_sprite = pygame.transform.scale(rotated_sprite, (int(w * pulse), int(h * pulse)))
+            
+            # 피격 상태: 빨갛게 깜빡거리는 효과 처리
+            if player_immune_timer > 0 and (player_immune_timer // 4) % 2 == 0:
+                scaled_sprite.set_alpha(100)
+            else:
+                scaled_sprite.set_alpha(255)
+                
+            rect = scaled_sprite.get_rect(center=(int(player_pos[0]), int(player_pos[1])))
+            screen.blit(scaled_sprite, rect)
+            
+            # 피격 보호막 원 그리기
+            if player_immune_timer > 0:
+                pygame.draw.circle(screen, WHITE, (int(player_pos[0]), int(player_pos[1])), player_radius + 4, 1)
+        else:
+            pc = PLAYER_IMMUNE if player_immune_timer > 0 else PLAYER_COLOR
+            pygame.draw.circle(screen, pc, (int(player_pos[0]), int(player_pos[1])), player_radius)
+            if player_immune_timer > 0:
+                pygame.draw.circle(screen, WHITE, (int(player_pos[0]), int(player_pos[1])), player_radius + 2, 2)
 
     # 근접 공격 이펙트
     if attack_timer>0:
@@ -937,9 +1008,18 @@ while running:
     pygame.draw.line(screen,WHITE,(0,HEIGHT-100),(WIDTH,HEIGHT-100),2)
     screen.blit(font.render(f"Words: {', '.join(player_words)}",True,(150,200,255)),(20,HEIGHT-92))
     screen.blit(font.render(f"Shapes: {', '.join(player_shapes)}",True,(200,255,150)),(20,HEIGHT-72))
-    pygame.draw.rect(screen,BLACK,(20,HEIGHT-45,WIDTH-40,35))
-    pygame.draw.rect(screen,WHITE,(20,HEIGHT-45,WIDTH-40,35),2)
-    screen.blit(big_font.render(input_text+"_",True,WHITE),(30,HEIGHT-42))
+    pygame.draw.rect(screen,BLACK,(20,HEIGHT-40,WIDTH-40,35))
+    pygame.draw.rect(screen,WHITE,(20,HEIGHT-40,WIDTH-40,35),2)
+    screen.blit(big_font.render(input_text+"_",True,WHITE),(30,HEIGHT-47))
+
+    # 피격 및 사망 애니메이션 체크를 위한 이전 HP 업데이트
+    if player_hp < player_prev_hp:
+        # 피격 시: 빨간 입자 뿜어져 나오기
+        spawn_player_particles(player_pos, (220, 60, 60), count=15, speed=3.0, size_range=(3, 6))
+    if player_hp <= 0 and player_prev_hp > 0:
+        # 사망 시: 산산조각 대폭발 이펙트
+        spawn_player_particles(player_pos, (100, 180, 255), count=50, speed=5.0, size_range=(3, 7))
+    player_prev_hp = player_hp
 
     pygame.display.flip()
     clock.tick(60)
