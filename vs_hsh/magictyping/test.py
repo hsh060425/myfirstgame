@@ -401,6 +401,90 @@ def draw_enemy(surface, e):
         pygame.draw.rect(surface, HP_RED, (bx, by, bar_w, 7))
         pygame.draw.rect(surface, HP_GREEN, (bx, by, int(bar_w * max(0, e["hp"] / e["max_hp"])), 7))
 
+ITEM_IMAGES = {}
+def get_item_image(iid):
+    if iid in ITEM_IMAGES: return ITEM_IMAGES[iid]
+    import os
+    path = os.path.join(SPRITE_DIR, f"{iid}.png")
+    if os.path.exists(path):
+        try:
+            img = pygame.image.load(path).convert_alpha()
+            img = pygame.transform.scale(img, (32, 32))
+            ITEM_IMAGES[iid] = img
+            return img
+        except: pass
+    ITEM_IMAGES[iid] = None
+    return None
+
+def draw_item_drop(surface, cx, cy, item_val, item_type):
+    import math
+    bounce = math.sin(pygame.time.get_ticks() * 0.005) * 5
+    cy += int(bounce)
+    
+    # 반짝이는 배경(Halo)
+    pygame.draw.circle(surface, (255, 255, 255), (cx, cy), 20, 1)
+    
+    if item_type == "word":
+        # 파란색 두루마리/책
+        pygame.draw.rect(surface, (50, 100, 255), (cx-10, cy-12, 20, 24))
+        pygame.draw.rect(surface, (255, 255, 255), (cx-8, cy-10, 16, 20))
+        pygame.draw.line(surface, (0, 0, 0), (cx-5, cy-5), (cx+5, cy-5), 2)
+        pygame.draw.line(surface, (0, 0, 0), (cx-5, cy), (cx+5, cy), 2)
+        pygame.draw.line(surface, (0, 0, 0), (cx-5, cy+5), (cx+5, cy+5), 2)
+    elif item_type == "shape":
+        # 초록색 보석
+        pygame.draw.polygon(surface, (50, 255, 50), [(cx, cy-15), (cx-12, cy), (cx, cy+15), (cx+12, cy)])
+        pygame.draw.polygon(surface, (200, 255, 200), [(cx, cy-15), (cx-12, cy), (cx, cy+15), (cx+12, cy)], 2)
+    else:
+        iid = item_val["id"]
+        img = get_item_image(iid)
+        if img:
+            surface.blit(img, (cx - img.get_width()//2, cy - img.get_height()//2))
+        elif iid == "hp_up":
+            # 하트
+            pygame.draw.polygon(surface, (255, 50, 50), [(cx, cy+12), (cx-12, cy-2), (cx-6, cy-8), (cx, cy-2), (cx+6, cy-8), (cx+12, cy-2)])
+        elif iid == "damage_up":
+            # 검
+            pygame.draw.line(surface, (200,200,200), (cx-10, cy+10), (cx+10, cy-10), 4)
+            pygame.draw.line(surface, (139,69,19), (cx-12, cy+12), (cx-6, cy+6), 4)
+        elif iid == "speed_up":
+            # 부츠
+            pygame.draw.polygon(surface, (100,200,100), [(cx-8, cy-10), (cx+4, cy-10), (cx+4, cy+10), (cx+12, cy+10), (cx+12, cy+14), (cx-8, cy+14)])
+        elif iid == "defense_up":
+            # 방패
+            pygame.draw.polygon(surface, (100,100,200), [(cx-10, cy-12), (cx+10, cy-12), (cx+10, cy+6), (cx, cy+16), (cx-10, cy+6)])
+        elif iid == "duration_up":
+            # 모래시계
+            pygame.draw.polygon(surface, (200,200,50), [(cx-10, cy-12), (cx+10, cy-12), (cx, cy), (cx-10, cy+12), (cx+10, cy+12)])
+        elif iid == "radius_up":
+            # 돋보기
+            pygame.draw.circle(surface, (150,200,255), (cx-4, cy-4), 8, 3)
+            pygame.draw.line(surface, (150,100,50), (cx+2, cy+2), (cx+10, cy+10), 4)
+        elif iid == "thorns":
+            # 가시 갑옷
+            pygame.draw.circle(surface, (150,150,150), (cx, cy), 10)
+            for angle in range(0, 360, 45):
+                rad = math.radians(angle)
+                end_x = cx + math.cos(rad) * 16
+                end_y = cy + math.sin(rad) * 16
+                pygame.draw.line(surface, (255,255,255), (cx, cy), (end_x, end_y), 2)
+        elif iid == "pet":
+            # 미니 슬라임
+            pygame.draw.circle(surface, (255,100,150), (cx, cy+6), 10)
+            pygame.draw.circle(surface, (0,0,0), (cx-4, cy+4), 2)
+            pygame.draw.circle(surface, (0,0,0), (cx+4, cy+4), 2)
+        elif iid == "elemental_blade":
+            # 속성 검 (빛나는 검)
+            pygame.draw.line(surface, (255,50,255), (cx-10, cy+10), (cx+10, cy-10), 6)
+            pygame.draw.line(surface, (255,255,255), (cx-10, cy+10), (cx+10, cy-10), 2)
+        elif iid == "map_reveal":
+            # 지도
+            pygame.draw.rect(surface, (200,180,140), (cx-12, cy-10, 24, 20))
+            pygame.draw.line(surface, (150,130,90), (cx-4, cy-10), (cx-4, cy+10), 2)
+            pygame.draw.line(surface, (150,130,90), (cx+4, cy-10), (cx+4, cy+10), 2)
+        else:
+            pygame.draw.circle(surface, (255,255,0), (cx, cy), 12)
+
 
 # ──────────────────────────────────────────────
 # 기존 맵 / 플레이어 시스템 (거의 동일)
@@ -928,12 +1012,7 @@ while running:
     # 보상
     if room.get("reward"):
         rv=room["reward"]["data"]["value"]; rt=room["reward"]["data"]["type"]
-        if rt in ["word","shape"]:
-            dtxt=f"[{rv}]"; dc=(255,255,0)
-        else:
-            dtxt=f"[{rv['name']}]"; dc=(0,255,255) if rt=="stackable_item" else (255,100,255)
-        rw=font.render(dtxt,True,dc)
-        screen.blit(rw,(room["reward"]["pos"][0]-rw.get_width()//2,room["reward"]["pos"][1]-15))
+        draw_item_drop(screen, room["reward"]["pos"][0], room["reward"]["pos"][1], rv, rt)
 
     # 플레이어 파티클 렌더
     update_and_draw_particles(screen)
