@@ -530,7 +530,7 @@ pet_attack_timer = 0
 STACKABLE_ITEMS = [
     {"id":"duration_up","name":"모래시계"}, {"id":"radius_up","name":"확대경"},
     {"id":"damage_up","name":"전사의 검"}, {"id":"speed_up","name":"바람의 부츠"},
-    {"id":"thorns","name":"가시 갑옷"}, {"id":"hp_up","name":"생명의 심장"},
+    {"id":"thorns","name":"가시 갑옷"}, {"id":"hp_up","name":"생명의 심장"}, 
     {"id":"defense_up","name":"강철 방패"}
 ]
 NON_STACKABLE_ITEMS = [
