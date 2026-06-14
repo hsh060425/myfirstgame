@@ -7,7 +7,7 @@ import os
 pygame.init()
 WIDTH, HEIGHT = 800, 750
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Typing Isaac - Items & Combos (+Cheat)")
+pygame.display.set_caption("magic typing")
 clock = pygame.time.Clock()
 
 WHITE, BLACK = (255, 255, 255), (15, 15, 15)
